@@ -31,6 +31,11 @@ class WebhookService:
         Returns:
             Processed webhook data with additional insights
         """
+        # === COMPREHENSIVE PAYLOAD LOGGING ===
+        logger.info(f"=== FULL WEBHOOK PAYLOAD RECEIVED ===")
+        logger.info(f"Raw payload: {data}")
+        logger.info(f"=== END FULL PAYLOAD ===")
+        
         event_type = data.get('event', 'unknown')
         logger.info(f"=== CALL EVENT WEBHOOK RECEIVED ===")
         logger.info(f"Event Type: {event_type}")
@@ -39,6 +44,20 @@ class WebhookService:
         logger.info(f"To Number: {data.get('call', {}).get('to_number', 'unknown')}")
         logger.info(f"Direction: {data.get('call', {}).get('direction', 'unknown')}")
         logger.info(f"Call Status: {data.get('call', {}).get('call_status', 'unknown')}")
+        
+        # Log transcript-related fields specifically
+        call_data = data.get('call', {})
+        logger.info(f"Transcript present: {'transcript' in call_data}")
+        logger.info(f"Transcript object present: {'transcript_object' in call_data}")
+        logger.info(f"Transcript with tool calls present: {'transcript_with_tool_calls' in call_data}")
+        
+        if 'transcript' in call_data:
+            logger.info(f"Transcript length: {len(call_data['transcript']) if call_data['transcript'] else 0}")
+        if 'transcript_object' in call_data:
+            logger.info(f"Transcript object length: {len(call_data['transcript_object']) if call_data['transcript_object'] else 0}")
+        if 'transcript_with_tool_calls' in call_data:
+            logger.info(f"Transcript with tool calls length: {len(call_data['transcript_with_tool_calls']) if call_data['transcript_with_tool_calls'] else 0}")
+        
         logger.info(f"=== END CALL EVENT WEBHOOK ===")
         
         # Validate webhook data
@@ -295,6 +314,8 @@ class WebhookService:
             'call_status': call_data.get('call_status', ''),
             'disconnection_reason': call_data.get('disconnection_reason', ''),
             'transcript': call_data.get('transcript', ''),
+            'transcript_object': call_data.get('transcript_object', {}),
+            'transcript_with_tool_calls': call_data.get('transcript_with_tool_calls', []),
             'start_timestamp': start_timestamp,
             'end_timestamp': end_timestamp,
             'duration_seconds': duration_seconds,
@@ -400,6 +421,8 @@ class WebhookService:
                 'call_status': webhook_data['call_status'],
                 'disconnection_reason': webhook_data['disconnection_reason'],
                 'transcript': webhook_data['transcript'],
+                'transcript_object': str(webhook_data.get('transcript_object', [])),
+                'transcript_with_tool_calls': str(webhook_data.get('transcript_with_tool_calls', [])),
                 'start_timestamp': webhook_data['start_timestamp'],
                 'end_timestamp': webhook_data['end_timestamp'],
                 'metadata': str(webhook_data['metadata']),
@@ -413,6 +436,9 @@ class WebhookService:
             logger.info(f"From: {airtable_record['from_number']} -> To: {airtable_record['to_number']}")
             logger.info(f"Direction: {airtable_record['direction']}")
             logger.info(f"Call Status: {airtable_record['call_status']}")
+            logger.info(f"Transcript length: {len(airtable_record['transcript']) if airtable_record['transcript'] else 0}")
+            logger.info(f"Transcript object present: {'transcript_object' in airtable_record and airtable_record['transcript_object'] != '[]'}")
+            logger.info(f"Transcript with tool calls present: {'transcript_with_tool_calls' in airtable_record and airtable_record['transcript_with_tool_calls'] != '[]'}")
             logger.info(f"opt_out_sensitive_data_storage: {airtable_record['opt_out_sensitive_data_storage']} (type: {type(airtable_record['opt_out_sensitive_data_storage'])})")
             logger.info(f"=== END AIRTABLE SAVE ===")
             
