@@ -16,24 +16,28 @@ def setup_logger(name: str, level: str = None) -> logging.Logger:
     Returns:
         Configured logger instance
     """
+    # Configure root logger to ensure all loggers work
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Remove existing handlers to avoid duplicates
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create console handler for root logger
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter(Config.LOG_FORMAT)
+    console_handler.setFormatter(formatter)
+    
+    # Add handler to root logger
+    root_logger.addHandler(console_handler)
+    
+    # Get the specific logger
     logger = logging.getLogger(name)
-    
-    # Set level
-    log_level = level or Config.LOG_LEVEL
-    logger.setLevel(getattr(logging, log_level.upper()))
-    
-    # Avoid adding handlers multiple times
-    if not logger.handlers:
-        # Create console handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(getattr(logging, log_level.upper()))
-        
-        # Create formatter
-        formatter = logging.Formatter(Config.LOG_FORMAT)
-        console_handler.setFormatter(formatter)
-        
-        # Add handler to logger
-        logger.addHandler(console_handler)
+    logger.setLevel(logging.INFO)
     
     return logger
 
@@ -47,4 +51,15 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         Logger instance
     """
+    # Ensure root logger is configured
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        # Configure root logger if not already done
+        root_logger.setLevel(logging.INFO)
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter(Config.LOG_FORMAT)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+    
     return logging.getLogger(name) 

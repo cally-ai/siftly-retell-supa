@@ -32,15 +32,6 @@ class WebhookService:
             Processed webhook data with additional insights
         """
         event_type = data.get('event', 'unknown')
-        print(f"=== CALL EVENT WEBHOOK RECEIVED ===")
-        print(f"Event Type: {event_type}")
-        print(f"Call ID: {data.get('call', {}).get('call_id', 'unknown')}")
-        print(f"From Number: {data.get('call', {}).get('from_number', 'unknown')}")
-        print(f"To Number: {data.get('call', {}).get('to_number', 'unknown')}")
-        print(f"Direction: {data.get('call', {}).get('direction', 'unknown')}")
-        print(f"Call Status: {data.get('call', {}).get('call_status', 'unknown')}")
-        print(f"=== END CALL EVENT WEBHOOK ===")
-        
         logger.info(f"=== CALL EVENT WEBHOOK RECEIVED ===")
         logger.info(f"Event Type: {event_type}")
         logger.info(f"Call ID: {data.get('call', {}).get('call_id', 'unknown')}")
@@ -84,13 +75,6 @@ class WebhookService:
             Response data with dynamic variables and configuration
         """
         event_type = data.get('event', 'unknown')
-        print(f"=== INBOUND CALL WEBHOOK RECEIVED ===")
-        print(f"Event Type: {event_type}")
-        print(f"Agent ID: {data.get('call_inbound', {}).get('agent_id', 'unknown')}")
-        print(f"From Number: {data.get('call_inbound', {}).get('from_number', 'unknown')}")
-        print(f"To Number: {data.get('call_inbound', {}).get('to_number', 'unknown')}")
-        print(f"=== END INBOUND CALL WEBHOOK ===")
-        
         logger.info(f"=== INBOUND CALL WEBHOOK RECEIVED ===")
         logger.info(f"Event Type: {event_type}")
         logger.info(f"Agent ID: {data.get('call_inbound', {}).get('agent_id', 'unknown')}")
@@ -116,7 +100,9 @@ class WebhookService:
         response_data = self._get_inbound_configuration(from_number, to_number, agent_id)
         
         # Log the response for debugging
-        logger.info(f"Returning inbound configuration: {response_data}")
+        logger.info(f"=== INBOUND RESPONSE TO RETELL ===")
+        logger.info(f"Response: {response_data}")
+        logger.info(f"=== END INBOUND RESPONSE ===")
         
         return response_data
     
@@ -141,15 +127,24 @@ class WebhookService:
         # You can customize this based on your business logic
         
         # Check if we have customer data for this number
+        logger.info(f"=== LOOKING UP CUSTOMER DATA ===")
+        logger.info(f"Looking up to_number: {to_number}")
+        
         customer_data = self._get_customer_data(to_number)
+        
+        logger.info(f"Customer data found: {customer_data is not None}")
+        if customer_data:
+            logger.info(f"Customer data: {customer_data}")
         
         if customer_data:
             # Known customer - use their specific dynamic variables from Airtable
             dynamic_vars = customer_data
+            logger.info(f"Using Airtable dynamic variables: {dynamic_vars}")
             
             # Override agent if customer has a preferred agent
             if customer_data.get('preferred_agent_id'):
                 response["call_inbound"]["override_agent_id"] = customer_data['preferred_agent_id']
+                logger.info(f"Overriding agent to: {customer_data['preferred_agent_id']}")
             
         else:
             # Unknown caller - use default configuration
@@ -161,6 +156,9 @@ class WebhookService:
                 "company_name": "Your Company",
                 "company_name_agent": "Assistant"
             }
+            logger.info(f"Using default dynamic variables: {dynamic_vars}")
+        
+        logger.info(f"=== END CUSTOMER DATA LOOKUP ===")
         
         # Add metadata for tracking
         metadata = {
@@ -188,9 +186,15 @@ class WebhookService:
             Customer data dictionary or None if not found
         """
         try:
+            logger.info(f"=== AIRTABLE LOOKUP START ===")
+            logger.info(f"Looking up to_number: {to_number}")
+            
             # Step 1: Find the to_number in TABLE_ID_TWILIO_NUMBER
             twilio_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tbl0PeZoX2qgl74ZT')
+            logger.info(f"Searching Twilio table for number: {to_number}")
             twilio_records = twilio_table.all(formula=f"{{twilio_number}} = '{to_number}'")
+            
+            logger.info(f"Found {len(twilio_records)} Twilio records")
             
             if not twilio_records:
                 logger.warning(f"No Twilio number found for: {to_number}")
@@ -252,6 +256,8 @@ class WebhookService:
                 except Exception as e:
                     logger.warning(f"Error processing language agent name record {linked_record_id}: {e}")
             
+            logger.info(f"Returning dynamic variables: {dynamic_variables}")
+            logger.info(f"=== AIRTABLE LOOKUP END ===")
             return dynamic_variables
             
         except Exception as e:
