@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: siftly-retell-webhook
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      # Airtable Configuration (Required)
+      - key: AIRTABLE_API_KEY
+        sync: false
+      - key: AIRTABLE_BASE_ID
+        sync: false
+      - key: AIRTABLE_TABLE_NAME
+        value: Main
+      
+      # Flask Configuration
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: false
+      - key: SECRET_KEY
+        generateValue: true
+      
+      # Logging Configuration
+      - key: LOG_LEVEL
+        value: INFO
+      
+      # Optional: Retell AI Webhook Secret (for enhanced security)
+      - key: RETELL_WEBHOOK_SECRET
+        sync: false
+        optional: true 
