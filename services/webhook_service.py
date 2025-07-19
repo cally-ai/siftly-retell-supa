@@ -3,6 +3,7 @@ Webhook service for processing Retell AI webhooks
 """
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from pyairtable import Table
 from config import Config
 from utils.logger import get_logger
 from utils.validators import validate_retell_webhook, validate_retell_inbound_webhook, sanitize_webhook_data
@@ -110,18 +111,11 @@ class WebhookService:
         # You can customize this based on your business logic
         
         # Check if we have customer data for this number
-        customer_data = self._get_customer_data(from_number)
+        customer_data = self._get_customer_data(to_number)
         
         if customer_data:
-            # Known customer - use their specific data
-            dynamic_vars = {
-                "customer_name": customer_data.get('name', 'Valued Customer'),
-                "customer_id": customer_data.get('id', ''),
-                "account_type": customer_data.get('account_type', 'standard'),
-                "preferred_language": customer_data.get('language', 'English'),
-                "company_name": customer_data.get('company', 'Your Company'),
-                "company_name_agent": f"{customer_data.get('company', 'Your Company')} Assistant"
-            }
+            # Known customer - use their specific dynamic variables from Airtable
+            dynamic_vars = customer_data
             
             # Override agent if customer has a preferred agent
             if customer_data.get('preferred_agent_id'):
@@ -153,40 +147,86 @@ class WebhookService:
         
         return response
     
-    def _get_customer_data(self, phone_number: str) -> Optional[Dict[str, Any]]:
+    def _get_customer_data(self, to_number: str) -> Optional[Dict[str, Any]]:
         """
-        Get customer data from database/storage based on phone number
+        Get customer data from Airtable based on to_number
         
         Args:
-            phone_number: Customer's phone number
+            to_number: The phone number to look up
         
         Returns:
             Customer data dictionary or None if not found
         """
-        # This is where you would integrate with your customer database
-        # For now, using a simple example with hardcoded data
-        
-        # Example customer database lookup
-        customer_database = {
-            "+12137771234": {
-                "id": "CUST001",
-                "name": "John Doe",
-                "company": "Acme Corp",
-                "account_type": "premium",
-                "language": "English",
-                "preferred_agent_id": "agent_premium_001"
-            },
-            "+12137771235": {
-                "id": "CUST002", 
-                "name": "Jane Smith",
-                "company": "Tech Solutions",
-                "account_type": "enterprise",
-                "language": "English",
-                "preferred_agent_id": "agent_enterprise_001"
-            }
-        }
-        
-        return customer_database.get(phone_number)
+        try:
+            # Step 1: Find the to_number in TABLE_ID_TWILIO_NUMBER
+            twilio_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tbl0PeZoX2qgl74ZT')
+            twilio_records = twilio_table.all(formula=f"{{twilio_number}} = '{to_number}'")
+            
+            if not twilio_records:
+                logger.warning(f"No Twilio number found for: {to_number}")
+                return None
+            
+            # Get the client record ID from the first match
+            twilio_record = twilio_records[0]
+            client_record_id = twilio_record['fields'].get('client', [None])[0] if twilio_record['fields'].get('client') else None
+            
+            if not client_record_id:
+                logger.warning(f"No client linked to Twilio number: {to_number}")
+                return None
+            
+            # Step 2: Get client data from TABLE_ID_CLIENT
+            client_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblkyQzhGKVv6H03U')
+            client_record = client_table.get(client_record_id)
+            
+            if not client_record:
+                logger.warning(f"Client record not found: {client_record_id}")
+                return None
+            
+            client_fields = client_record['fields']
+            
+            # Step 3: Get dynamic variables from TABLE_ID_CLIENT_DYNAMIC_VARIABLES
+            dynamic_variables = {}
+            dynamic_variables_record_id = client_fields.get('dynamic_variables', [None])[0] if client_fields.get('dynamic_variables') else None
+            
+            if dynamic_variables_record_id:
+                dynamic_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblGIPAQZ2rgn6naD')
+                dynamic_record = dynamic_table.get(dynamic_variables_record_id)
+                
+                if dynamic_record:
+                    dynamic_fields = dynamic_record['fields']
+                    
+                    # Add all fields except excluded ones
+                    excluded_fields = ['name', 'client_dynamic_variables_id', 'client']
+                    for field_name, field_value in dynamic_fields.items():
+                        if field_name not in excluded_fields:
+                            dynamic_variables[field_name] = field_value
+            
+            # Step 4: Get language agent names from linked records
+            language_agent_names = client_fields.get('language_agent_names', [])
+            
+            for linked_record_id in language_agent_names:
+                try:
+                    language_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblT79Xju3vLxNipr')
+                    language_record = language_table.get(linked_record_id)
+                    
+                    if language_record:
+                        key_pair_value = language_record['fields'].get('key_pair', '')
+                        if key_pair_value and '=' in key_pair_value:
+                            # Parse key_pair like "nl-be_agent_name = Tom"
+                            parts = key_pair_value.split('=', 1)
+                            if len(parts) == 2:
+                                key = parts[0].strip()
+                                value = parts[1].strip()
+                                dynamic_variables[key] = value
+                                
+                except Exception as e:
+                    logger.warning(f"Error processing language agent name record {linked_record_id}: {e}")
+            
+            return dynamic_variables
+            
+        except Exception as e:
+            logger.error(f"Error getting customer data for {to_number}: {e}")
+            return None
     
     def _extract_webhook_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -312,29 +352,23 @@ class WebhookService:
             return False
         
         try:
-            # Prepare Airtable record
+            # Prepare Airtable record - only Retell data with correct field names
             airtable_record = {
-                'Timestamp': webhook_data['timestamp'],
-                'Event Type': webhook_data['event_type'],
-                'Call ID': webhook_data['call_id'],
-                'Agent ID': webhook_data['agent_id'],
-                'Call Type': webhook_data['call_type'],
-                'From Number': webhook_data['from_number'],
-                'To Number': webhook_data['to_number'],
-                'Direction': webhook_data['direction'],
-                'Call Status': webhook_data['call_status'],
-                'Disconnection Reason': webhook_data['disconnection_reason'],
-                'Transcript': webhook_data['transcript'],
-                'Duration Seconds': webhook_data['duration_seconds'],
-                'Start Timestamp': webhook_data['start_timestamp'],
-                'End Timestamp': webhook_data['end_timestamp'],
-                'Priority Level': webhook_data['insights']['priority_level'],
-                'Keywords Found': ', '.join(webhook_data['insights']['keywords_found']),
-                'Requires Followup': webhook_data['insights']['requires_followup'],
-                'Sentiment Score': webhook_data['insights']['sentiment_score'],
-                'Metadata': str(webhook_data['metadata']),
-                'Dynamic Variables': str(webhook_data['retell_llm_dynamic_variables']),
-                'Raw Data': str(webhook_data['raw_data'])
+                'event': webhook_data['event_type'],
+                'call_id': webhook_data['call_id'],
+                'agent_id': webhook_data['agent_id'],
+                'call_type': webhook_data['call_type'],
+                'from_number': webhook_data['from_number'],
+                'to_number': webhook_data['to_number'],
+                'direction': webhook_data['direction'],
+                'call_status': webhook_data['call_status'],
+                'disconnection_reason': webhook_data['disconnection_reason'],
+                'transcript': webhook_data['transcript'],
+                'start_timestamp': webhook_data['start_timestamp'],
+                'end_timestamp': webhook_data['end_timestamp'],
+                'metadata': str(webhook_data['metadata']),
+                'retell_llm_dynamic_variables': str(webhook_data['retell_llm_dynamic_variables']),
+                'opt_out_sensitive_data_storage': webhook_data.get('opt_out_sensitive_data_storage', False)
             }
             
             record = airtable_service.create_record(airtable_record)

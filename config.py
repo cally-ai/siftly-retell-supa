@@ -18,7 +18,7 @@ class Config:
     # Airtable Configuration
     AIRTABLE_API_KEY = os.getenv('AIRTABLE_API_KEY')
     AIRTABLE_BASE_ID = os.getenv('AIRTABLE_BASE_ID')
-    AIRTABLE_TABLE_NAME = os.getenv('AIRTABLE_TABLE_NAME', 'tbl3mjOWELyIG2m6o')  # TABLE_ID_CALLER
+    AIRTABLE_TABLE_NAME = os.getenv('AIRTABLE_TABLE_NAME')
     
     # Retell AI Configuration
     RETELL_WEBHOOK_SECRET = os.getenv('RETELL_WEBHOOK_SECRET')
@@ -39,6 +39,8 @@ class Config:
             missing_vars.append('AIRTABLE_API_KEY')
         if not cls.AIRTABLE_BASE_ID:
             missing_vars.append('AIRTABLE_BASE_ID')
+        if not cls.AIRTABLE_TABLE_NAME:
+            missing_vars.append('AIRTABLE_TABLE_NAME')
             
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
