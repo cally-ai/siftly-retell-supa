@@ -21,7 +21,7 @@ def retell_webhook():
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
         
-        logger.info(f"Received webhook from Retell AI: {data.get('event_type', 'unknown')}")
+        logger.info(f"Received webhook from Retell AI: {data.get('event', 'unknown')}")
         
         # Process the webhook using the service
         processed_data = webhook_service.process_retell_webhook(data)
@@ -37,6 +37,30 @@ def retell_webhook():
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         logger.error(f"Error processing webhook: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+@webhook_bp.route('/inbound', methods=['POST'])
+def inbound_webhook():
+    """Handle inbound call webhooks from Retell AI"""
+    try:
+        # Get the JSON data from the request
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No JSON data received'}), 400
+        
+        logger.info(f"Received inbound webhook from Retell AI: {data.get('event', 'unknown')}")
+        
+        # Process the inbound webhook using the service
+        response_data = webhook_service.process_inbound_webhook(data)
+        
+        return jsonify(response_data), 200
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error processing inbound webhook: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 @webhook_bp.route('/statistics', methods=['GET'])

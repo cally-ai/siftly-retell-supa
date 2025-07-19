@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from config import Config
 from utils.logger import get_logger
-from utils.validators import validate_retell_webhook, sanitize_webhook_data
+from utils.validators import validate_retell_webhook, validate_retell_inbound_webhook, sanitize_webhook_data
 from services.airtable_service import airtable_service
 
 logger = get_logger(__name__)
@@ -54,6 +54,139 @@ class WebhookService:
         self._handle_event_specific_processing(processed_data)
         
         return processed_data
+    
+    def process_inbound_webhook(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process incoming inbound call webhook from Retell AI
+        
+        Args:
+            data: Raw inbound webhook data from Retell AI
+        
+        Returns:
+            Response data with dynamic variables and configuration
+        """
+        logger.info(f"Processing inbound webhook: {data.get('event', 'unknown')}")
+        
+        # Validate inbound webhook data
+        is_valid, errors = validate_retell_inbound_webhook(data)
+        if not is_valid:
+            logger.error(f"Invalid inbound webhook data: {errors}")
+            raise ValueError(f"Invalid inbound webhook data: {errors}")
+        
+        # Extract inbound call data
+        inbound_data = data.get('call_inbound', {})
+        from_number = inbound_data.get('from_number', '')
+        to_number = inbound_data.get('to_number', '')
+        agent_id = inbound_data.get('agent_id', '')
+        
+        logger.info(f"Inbound call from {from_number} to {to_number}")
+        
+        # Get dynamic variables and configuration based on caller
+        response_data = self._get_inbound_configuration(from_number, to_number, agent_id)
+        
+        # Log the response for debugging
+        logger.info(f"Returning inbound configuration: {response_data}")
+        
+        return response_data
+    
+    def _get_inbound_configuration(self, from_number: str, to_number: str, agent_id: str) -> Dict[str, Any]:
+        """
+        Get dynamic variables and configuration for inbound call
+        
+        Args:
+            from_number: Caller's phone number
+            to_number: Receiver's phone number
+            agent_id: Default agent ID (if configured)
+        
+        Returns:
+            Configuration response for Retell AI
+        """
+        # Initialize response structure
+        response = {
+            "call_inbound": {}
+        }
+        
+        # Example logic: Different dynamic variables based on caller
+        # You can customize this based on your business logic
+        
+        # Check if we have customer data for this number
+        customer_data = self._get_customer_data(from_number)
+        
+        if customer_data:
+            # Known customer - use their specific data
+            dynamic_vars = {
+                "customer_name": customer_data.get('name', 'Valued Customer'),
+                "customer_id": customer_data.get('id', ''),
+                "account_type": customer_data.get('account_type', 'standard'),
+                "preferred_language": customer_data.get('language', 'English'),
+                "company_name": customer_data.get('company', 'Your Company'),
+                "company_name_agent": f"{customer_data.get('company', 'Your Company')} Assistant"
+            }
+            
+            # Override agent if customer has a preferred agent
+            if customer_data.get('preferred_agent_id'):
+                response["call_inbound"]["override_agent_id"] = customer_data['preferred_agent_id']
+            
+        else:
+            # Unknown caller - use default configuration
+            dynamic_vars = {
+                "customer_name": "New Customer",
+                "customer_id": "",
+                "account_type": "new",
+                "preferred_language": "English",
+                "company_name": "Your Company",
+                "company_name_agent": "Assistant"
+            }
+        
+        # Add metadata for tracking
+        metadata = {
+            "inbound_timestamp": datetime.now().isoformat(),
+            "from_number": from_number,
+            "to_number": to_number,
+            "original_agent_id": agent_id,
+            "customer_known": customer_data is not None
+        }
+        
+        # Build response
+        response["call_inbound"]["dynamic_variables"] = dynamic_vars
+        response["call_inbound"]["metadata"] = metadata
+        
+        return response
+    
+    def _get_customer_data(self, phone_number: str) -> Optional[Dict[str, Any]]:
+        """
+        Get customer data from database/storage based on phone number
+        
+        Args:
+            phone_number: Customer's phone number
+        
+        Returns:
+            Customer data dictionary or None if not found
+        """
+        # This is where you would integrate with your customer database
+        # For now, using a simple example with hardcoded data
+        
+        # Example customer database lookup
+        customer_database = {
+            "+12137771234": {
+                "id": "CUST001",
+                "name": "John Doe",
+                "company": "Acme Corp",
+                "account_type": "premium",
+                "language": "English",
+                "preferred_agent_id": "agent_premium_001"
+            },
+            "+12137771235": {
+                "id": "CUST002", 
+                "name": "Jane Smith",
+                "company": "Tech Solutions",
+                "account_type": "enterprise",
+                "language": "English",
+                "preferred_agent_id": "agent_enterprise_001"
+            }
+        }
+        
+        return customer_database.get(phone_number)
     
     def _extract_webhook_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -61,6 +61,65 @@ def validate_retell_webhook(data: Dict[str, Any]) -> tuple[bool, List[str]]:
     
     return len(errors) == 0, errors
 
+def validate_retell_inbound_webhook(data: Dict[str, Any]) -> tuple[bool, List[str]]:
+    """
+    Validate Retell AI inbound webhook data
+    
+    Args:
+        data: Inbound webhook data dictionary
+    
+    Returns:
+        Tuple of (is_valid, list_of_errors)
+    """
+    errors = []
+    
+    # Check if data is a dictionary
+    if not isinstance(data, dict):
+        errors.append("Data must be a JSON object")
+        return False, errors
+    
+    # Required fields for inbound webhook format
+    required_fields = ['event', 'call_inbound']
+    for field in required_fields:
+        if field not in data:
+            errors.append(f"Missing required field: {field}")
+    
+    # Validate event type
+    if 'event' in data:
+        if data['event'] != 'call_inbound':
+            errors.append("Invalid event. Must be 'call_inbound'")
+    
+    # Validate call_inbound object
+    if 'call_inbound' in data:
+        call_inbound_data = data['call_inbound']
+        if not isinstance(call_inbound_data, dict):
+            errors.append("call_inbound must be an object")
+        else:
+            # Validate required call_inbound fields
+            call_inbound_required_fields = ['from_number', 'to_number']
+            for field in call_inbound_required_fields:
+                if field not in call_inbound_data:
+                    errors.append(f"Missing required call_inbound field: {field}")
+            
+            # Validate phone number formats (basic validation)
+            if 'from_number' in call_inbound_data:
+                from_number = call_inbound_data['from_number']
+                if not isinstance(from_number, str) or not from_number.startswith('+'):
+                    errors.append("from_number must be a string starting with '+'")
+            
+            if 'to_number' in call_inbound_data:
+                to_number = call_inbound_data['to_number']
+                if not isinstance(to_number, str) or not to_number.startswith('+'):
+                    errors.append("to_number must be a string starting with '+'")
+            
+            # Validate agent_id if present
+            if 'agent_id' in call_inbound_data:
+                agent_id = call_inbound_data['agent_id']
+                if not isinstance(agent_id, str):
+                    errors.append("agent_id must be a string")
+    
+    return len(errors) == 0, errors
+
 def validate_airtable_record(data: Dict[str, Any]) -> tuple[bool, List[str]]:
     """
     Validate Airtable record data

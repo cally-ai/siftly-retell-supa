@@ -66,6 +66,33 @@ def test_retell_webhook():
         print(f"Error: {e}")
         return False
 
+def test_inbound_webhook():
+    """Test the Retell AI inbound webhook endpoint"""
+    print("\nTesting Retell AI inbound webhook endpoint...")
+    
+    # Sample inbound webhook data in Retell AI format
+    inbound_data = {
+        "event": "call_inbound",
+        "call_inbound": {
+            "agent_id": "agent_12345",
+            "from_number": "+12137771234",
+            "to_number": "+12137771235"
+        }
+    }
+    
+    try:
+        response = requests.post(
+            f"{BASE_URL}/webhook/inbound",
+            json=inbound_data,
+            headers={"Content-Type": "application/json"}
+        )
+        print(f"Status Code: {response.status_code}")
+        print(f"Response: {json.dumps(response.json(), indent=2)}")
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Error: {e}")
+        return False
+
 def test_airtable_endpoints():
     """Test Airtable endpoints"""
     print("\nTesting Airtable endpoints...")
@@ -165,6 +192,7 @@ def main():
         ("Health Endpoint", test_health_endpoint),
         ("System Status", test_system_status),
         ("Retell Webhook", test_retell_webhook),
+        ("Inbound Webhook", test_inbound_webhook),
         ("Webhook Statistics", test_webhook_statistics),
         ("Airtable Endpoints", test_airtable_endpoints)
     ]
