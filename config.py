@@ -18,7 +18,7 @@ class Config:
     # Airtable Configuration
     AIRTABLE_API_KEY = os.getenv('AIRTABLE_API_KEY')
     AIRTABLE_BASE_ID = os.getenv('AIRTABLE_BASE_ID')
-    AIRTABLE_TABLE_NAME = os.getenv('AIRTABLE_TABLE_NAME', 'Main')
+    AIRTABLE_TABLE_NAME = os.getenv('AIRTABLE_TABLE_NAME', 'tbl3mjOWELyIG2m6o')  # TABLE_ID_CALLER
     
     # Retell AI Configuration
     RETELL_WEBHOOK_SECRET = os.getenv('RETELL_WEBHOOK_SECRET')

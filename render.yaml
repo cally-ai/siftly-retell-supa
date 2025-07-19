@@ -12,7 +12,7 @@ services:
       - key: AIRTABLE_BASE_ID
         sync: false
       - key: AIRTABLE_TABLE_NAME
-        value: Main
+        value: tbl3mjOWELyIG2m6o
       
       # Flask Configuration
       - key: FLASK_ENV
