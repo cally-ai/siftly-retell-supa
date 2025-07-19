@@ -32,6 +32,15 @@ class WebhookService:
             Processed webhook data with additional insights
         """
         event_type = data.get('event', 'unknown')
+        print(f"=== CALL EVENT WEBHOOK RECEIVED ===")
+        print(f"Event Type: {event_type}")
+        print(f"Call ID: {data.get('call', {}).get('call_id', 'unknown')}")
+        print(f"From Number: {data.get('call', {}).get('from_number', 'unknown')}")
+        print(f"To Number: {data.get('call', {}).get('to_number', 'unknown')}")
+        print(f"Direction: {data.get('call', {}).get('direction', 'unknown')}")
+        print(f"Call Status: {data.get('call', {}).get('call_status', 'unknown')}")
+        print(f"=== END CALL EVENT WEBHOOK ===")
+        
         logger.info(f"=== CALL EVENT WEBHOOK RECEIVED ===")
         logger.info(f"Event Type: {event_type}")
         logger.info(f"Call ID: {data.get('call', {}).get('call_id', 'unknown')}")
@@ -75,6 +84,13 @@ class WebhookService:
             Response data with dynamic variables and configuration
         """
         event_type = data.get('event', 'unknown')
+        print(f"=== INBOUND CALL WEBHOOK RECEIVED ===")
+        print(f"Event Type: {event_type}")
+        print(f"Agent ID: {data.get('call_inbound', {}).get('agent_id', 'unknown')}")
+        print(f"From Number: {data.get('call_inbound', {}).get('from_number', 'unknown')}")
+        print(f"To Number: {data.get('call_inbound', {}).get('to_number', 'unknown')}")
+        print(f"=== END INBOUND CALL WEBHOOK ===")
+        
         logger.info(f"=== INBOUND CALL WEBHOOK RECEIVED ===")
         logger.info(f"Event Type: {event_type}")
         logger.info(f"Agent ID: {data.get('call_inbound', {}).get('agent_id', 'unknown')}")
