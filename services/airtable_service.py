@@ -25,7 +25,9 @@ class AirtableService:
         self.base_id = base_id or Config.AIRTABLE_BASE_ID
         self.table_name = table_name or Config.AIRTABLE_TABLE_NAME
         
-        if not self.api_key or not self.base_id:
+        logger.info(f"Airtable config - API Key: {'SET' if self.api_key else 'NOT SET'}, Base ID: {'SET' if self.base_id else 'NOT SET'}, Table Name: {self.table_name}")
+        
+        if not self.api_key or not self.base_id or not self.table_name:
             logger.warning("Airtable credentials not provided. Service will be disabled.")
             self.table = None
         else:

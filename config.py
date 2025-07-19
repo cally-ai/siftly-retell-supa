@@ -41,6 +41,13 @@ class Config:
             missing_vars.append('AIRTABLE_BASE_ID')
         if not cls.AIRTABLE_TABLE_NAME:
             missing_vars.append('AIRTABLE_TABLE_NAME')
+        
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Config validation - AIRTABLE_API_KEY: {'SET' if cls.AIRTABLE_API_KEY else 'NOT SET'}")
+        logger.info(f"Config validation - AIRTABLE_BASE_ID: {'SET' if cls.AIRTABLE_BASE_ID else 'NOT SET'}")
+        logger.info(f"Config validation - AIRTABLE_TABLE_NAME: {cls.AIRTABLE_TABLE_NAME}")
             
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
