@@ -382,7 +382,7 @@ class WebhookService:
                 'end_timestamp': webhook_data['end_timestamp'],
                 'metadata': str(webhook_data['metadata']),
                 'retell_llm_dynamic_variables': str(webhook_data['retell_llm_dynamic_variables']),
-                'opt_out_sensitive_data_storage': bool(webhook_data.get('opt_out_sensitive_data_storage', False))
+                'opt_out_sensitive_data_storage': str(webhook_data.get('opt_out_sensitive_data_storage', False)).lower()
             }
             
             logger.info(f"=== SAVING TO AIRTABLE ===")
