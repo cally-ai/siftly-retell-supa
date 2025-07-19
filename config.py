@@ -7,6 +7,14 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Debug: Print all environment variables
+import os
+print("=== ENVIRONMENT VARIABLES DEBUG ===")
+print(f"AIRTABLE_API_KEY: {os.getenv('AIRTABLE_API_KEY', 'NOT SET')}")
+print(f"AIRTABLE_BASE_ID: {os.getenv('AIRTABLE_BASE_ID', 'NOT SET')}")
+print(f"AIRTABLE_TABLE_NAME: {os.getenv('AIRTABLE_TABLE_NAME', 'NOT SET')}")
+print("=== END DEBUG ===")
+
 class Config:
     """Base configuration class"""
     
