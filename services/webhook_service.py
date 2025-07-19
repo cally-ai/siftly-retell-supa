@@ -31,7 +31,15 @@ class WebhookService:
         Returns:
             Processed webhook data with additional insights
         """
-        logger.info(f"Processing Retell webhook: {data.get('event', 'unknown')}")
+        event_type = data.get('event', 'unknown')
+        logger.info(f"=== CALL EVENT WEBHOOK RECEIVED ===")
+        logger.info(f"Event Type: {event_type}")
+        logger.info(f"Call ID: {data.get('call', {}).get('call_id', 'unknown')}")
+        logger.info(f"From Number: {data.get('call', {}).get('from_number', 'unknown')}")
+        logger.info(f"To Number: {data.get('call', {}).get('to_number', 'unknown')}")
+        logger.info(f"Direction: {data.get('call', {}).get('direction', 'unknown')}")
+        logger.info(f"Call Status: {data.get('call', {}).get('call_status', 'unknown')}")
+        logger.info(f"=== END CALL EVENT WEBHOOK ===")
         
         # Validate webhook data
         is_valid, errors = validate_retell_webhook(data)
@@ -66,7 +74,13 @@ class WebhookService:
         Returns:
             Response data with dynamic variables and configuration
         """
-        logger.info(f"Processing inbound webhook: {data.get('event', 'unknown')}")
+        event_type = data.get('event', 'unknown')
+        logger.info(f"=== INBOUND CALL WEBHOOK RECEIVED ===")
+        logger.info(f"Event Type: {event_type}")
+        logger.info(f"Agent ID: {data.get('call_inbound', {}).get('agent_id', 'unknown')}")
+        logger.info(f"From Number: {data.get('call_inbound', {}).get('from_number', 'unknown')}")
+        logger.info(f"To Number: {data.get('call_inbound', {}).get('to_number', 'unknown')}")
+        logger.info(f"=== END INBOUND CALL WEBHOOK ===")
         
         # Validate inbound webhook data
         is_valid, errors = validate_retell_inbound_webhook(data)
@@ -368,8 +382,17 @@ class WebhookService:
                 'end_timestamp': webhook_data['end_timestamp'],
                 'metadata': str(webhook_data['metadata']),
                 'retell_llm_dynamic_variables': str(webhook_data['retell_llm_dynamic_variables']),
-                'opt_out_sensitive_data_storage': webhook_data.get('opt_out_sensitive_data_storage', False)
+                'opt_out_sensitive_data_storage': bool(webhook_data.get('opt_out_sensitive_data_storage', False))
             }
+            
+            logger.info(f"=== SAVING TO AIRTABLE ===")
+            logger.info(f"Event: {airtable_record['event']}")
+            logger.info(f"Call ID: {airtable_record['call_id']}")
+            logger.info(f"From: {airtable_record['from_number']} -> To: {airtable_record['to_number']}")
+            logger.info(f"Direction: {airtable_record['direction']}")
+            logger.info(f"Call Status: {airtable_record['call_status']}")
+            logger.info(f"opt_out_sensitive_data_storage: {airtable_record['opt_out_sensitive_data_storage']} (type: {type(airtable_record['opt_out_sensitive_data_storage'])})")
+            logger.info(f"=== END AIRTABLE SAVE ===")
             
             record = airtable_service.create_record(airtable_record)
             if record:
