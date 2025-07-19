@@ -2,7 +2,7 @@
 Airtable service for handling all Airtable operations
 """
 from typing import Dict, Any, List, Optional, Union
-from pyairtable import Table
+from pyairtable import Api, Base, Table
 from config import Config
 from utils.logger import get_logger
 from utils.validators import validate_airtable_record
