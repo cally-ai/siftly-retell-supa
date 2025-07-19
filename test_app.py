@@ -30,18 +30,27 @@ def test_retell_webhook():
     """Test the Retell AI webhook endpoint"""
     print("\nTesting Retell AI webhook endpoint...")
     
-    # Sample webhook data
+    # Sample webhook data in Retell AI format
     webhook_data = {
-        "event_type": "call_ended",
-        "call_id": "test_call_123",
-        "agent_id": "test_agent_456",
-        "customer_id": "test_customer_789",
-        "status": "completed",
-        "transcript": "Hello, this is a test call. I need help with my account.",
-        "summary": "Customer requested account assistance",
-        "sentiment": "neutral",
-        "duration": 180,
-        "cost": 0.75
+        "event": "call_ended",
+        "call": {
+            "call_type": "phone_call",
+            "from_number": "+12137771234",
+            "to_number": "+12137771235",
+            "direction": "inbound",
+            "call_id": "test_call_123",
+            "agent_id": "test_agent_456",
+            "call_status": "completed",
+            "metadata": {},
+            "retell_llm_dynamic_variables": {
+                "customer_name": "John Doe"
+            },
+            "start_timestamp": 1714608475945,
+            "end_timestamp": 1714608491736,
+            "disconnection_reason": "user_hangup",
+            "transcript": "Hello, this is a test call. I need help with my account.",
+            "opt_out_sensitive_data_storage": False
+        }
     }
     
     try:

@@ -30,7 +30,7 @@ class WebhookService:
         Returns:
             Processed webhook data with additional insights
         """
-        logger.info(f"Processing Retell webhook: {data.get('event_type', 'unknown')}")
+        logger.info(f"Processing Retell webhook: {data.get('event', 'unknown')}")
         
         # Validate webhook data
         is_valid, errors = validate_retell_webhook(data)
@@ -57,7 +57,7 @@ class WebhookService:
     
     def _extract_webhook_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Extract and structure webhook data
+        Extract and structure webhook data from Retell AI format
         
         Args:
             data: Sanitized webhook data
@@ -65,20 +65,33 @@ class WebhookService:
         Returns:
             Structured webhook data
         """
+        # Extract call object from Retell webhook format
+        call_data = data.get('call', {})
+        
+        # Calculate duration from timestamps
+        start_timestamp = call_data.get('start_timestamp', 0)
+        end_timestamp = call_data.get('end_timestamp', 0)
+        duration_seconds = (end_timestamp - start_timestamp) / 1000 if end_timestamp > start_timestamp else 0
+        
         return {
             'timestamp': datetime.now().isoformat(),
             'raw_data': data,
-            'event_type': data.get('event_type', 'unknown'),
-            'call_id': data.get('call_id', ''),
-            'agent_id': data.get('agent_id', ''),
-            'customer_id': data.get('customer_id', ''),
-            'status': data.get('status', ''),
-            'transcript': data.get('transcript', ''),
-            'summary': data.get('summary', ''),
-            'sentiment': data.get('sentiment', ''),
-            'duration': data.get('duration', 0),
-            'cost': data.get('cost', 0),
-            'metadata': data.get('metadata', {})
+            'event_type': data.get('event', 'unknown'),
+            'call_id': call_data.get('call_id', ''),
+            'agent_id': call_data.get('agent_id', ''),
+            'call_type': call_data.get('call_type', ''),
+            'from_number': call_data.get('from_number', ''),
+            'to_number': call_data.get('to_number', ''),
+            'direction': call_data.get('direction', ''),
+            'call_status': call_data.get('call_status', ''),
+            'disconnection_reason': call_data.get('disconnection_reason', ''),
+            'transcript': call_data.get('transcript', ''),
+            'start_timestamp': start_timestamp,
+            'end_timestamp': end_timestamp,
+            'duration_seconds': duration_seconds,
+            'metadata': call_data.get('metadata', {}),
+            'retell_llm_dynamic_variables': call_data.get('retell_llm_dynamic_variables', {}),
+            'opt_out_sensitive_data_storage': call_data.get('opt_out_sensitive_data_storage', False)
         }
     
     def _add_insights(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -124,7 +137,7 @@ class WebhookService:
             insights['requires_followup'] = True
         
         # Analyze duration for potential issues
-        duration = webhook_data.get('duration', 0)
+        duration = webhook_data.get('duration_seconds', 0)
         if duration > 600:  # More than 10 minutes
             insights['long_call'] = True
             if insights['priority_level'] == 'normal':
@@ -172,17 +185,22 @@ class WebhookService:
                 'Event Type': webhook_data['event_type'],
                 'Call ID': webhook_data['call_id'],
                 'Agent ID': webhook_data['agent_id'],
-                'Customer ID': webhook_data['customer_id'],
-                'Status': webhook_data['status'],
+                'Call Type': webhook_data['call_type'],
+                'From Number': webhook_data['from_number'],
+                'To Number': webhook_data['to_number'],
+                'Direction': webhook_data['direction'],
+                'Call Status': webhook_data['call_status'],
+                'Disconnection Reason': webhook_data['disconnection_reason'],
                 'Transcript': webhook_data['transcript'],
-                'Summary': webhook_data['summary'],
-                'Sentiment': webhook_data['sentiment'],
-                'Duration': webhook_data['duration'],
-                'Cost': webhook_data['cost'],
+                'Duration Seconds': webhook_data['duration_seconds'],
+                'Start Timestamp': webhook_data['start_timestamp'],
+                'End Timestamp': webhook_data['end_timestamp'],
                 'Priority Level': webhook_data['insights']['priority_level'],
                 'Keywords Found': ', '.join(webhook_data['insights']['keywords_found']),
                 'Requires Followup': webhook_data['insights']['requires_followup'],
                 'Sentiment Score': webhook_data['insights']['sentiment_score'],
+                'Metadata': str(webhook_data['metadata']),
+                'Dynamic Variables': str(webhook_data['retell_llm_dynamic_variables']),
                 'Raw Data': str(webhook_data['raw_data'])
             }
             
@@ -211,10 +229,8 @@ class WebhookService:
             self._handle_call_ended(webhook_data)
         elif event_type == 'call_started':
             self._handle_call_started(webhook_data)
-        elif event_type == 'call_failed':
-            self._handle_call_failed(webhook_data)
-        elif event_type == 'call_transferred':
-            self._handle_call_transferred(webhook_data)
+        elif event_type == 'call_analyzed':
+            self._handle_call_analyzed(webhook_data)
     
     def _handle_call_ended(self, webhook_data: Dict[str, Any]) -> None:
         """Handle call ended event"""
@@ -234,19 +250,19 @@ class WebhookService:
         # Add your custom logic for call started events
         # For example: log call initiation, update status, etc.
     
-    def _handle_call_failed(self, webhook_data: Dict[str, Any]) -> None:
-        """Handle call failed event"""
-        logger.warning(f"Call failed: {webhook_data['call_id']}")
+    def _handle_call_analyzed(self, webhook_data: Dict[str, Any]) -> None:
+        """Handle call analyzed event"""
+        logger.info(f"Call analyzed: {webhook_data['call_id']}")
         
-        # Add your custom logic for call failed events
-        # For example: trigger alerts, retry logic, etc.
-    
-    def _handle_call_transferred(self, webhook_data: Dict[str, Any]) -> None:
-        """Handle call transferred event"""
-        logger.info(f"Call transferred: {webhook_data['call_id']}")
+        # Add your custom logic for call analyzed events
+        # For example: trigger follow-up actions, update analytics, etc.
         
-        # Add your custom logic for call transferred events
-        # For example: update routing, log transfer reason, etc.
+        # This event contains the full call analysis data
+        # You can access call_analysis object from the raw data
+        call_analysis = webhook_data['raw_data'].get('call', {}).get('call_analysis', {})
+        if call_analysis:
+            logger.info(f"Call analysis available for {webhook_data['call_id']}")
+            # Process call analysis data here
     
     def get_webhook_statistics(self, hours: int = 24) -> Dict[str, Any]:
         """

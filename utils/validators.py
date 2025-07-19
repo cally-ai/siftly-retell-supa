@@ -22,37 +22,42 @@ def validate_retell_webhook(data: Dict[str, Any]) -> tuple[bool, List[str]]:
         errors.append("Data must be a JSON object")
         return False, errors
     
-    # Required fields
-    required_fields = ['event_type', 'call_id']
+    # Required fields for Retell webhook format
+    required_fields = ['event', 'call']
     for field in required_fields:
         if field not in data:
             errors.append(f"Missing required field: {field}")
     
-    # Validate event_type
-    if 'event_type' in data:
-        valid_events = ['call_started', 'call_ended', 'call_transferred', 'call_failed']
-        if data['event_type'] not in valid_events:
-            errors.append(f"Invalid event_type. Must be one of: {', '.join(valid_events)}")
+    # Validate event type
+    if 'event' in data:
+        valid_events = ['call_started', 'call_ended', 'call_analyzed']
+        if data['event'] not in valid_events:
+            errors.append(f"Invalid event. Must be one of: {', '.join(valid_events)}")
     
-    # Validate call_id format (basic validation)
-    if 'call_id' in data and not isinstance(data['call_id'], str):
-        errors.append("call_id must be a string")
-    
-    # Validate duration if present
-    if 'duration' in data:
-        if not isinstance(data['duration'], (int, float)) or data['duration'] < 0:
-            errors.append("duration must be a non-negative number")
-    
-    # Validate cost if present
-    if 'cost' in data:
-        if not isinstance(data['cost'], (int, float)) or data['cost'] < 0:
-            errors.append("cost must be a non-negative number")
-    
-    # Validate sentiment if present
-    if 'sentiment' in data:
-        valid_sentiments = ['positive', 'negative', 'neutral', 'mixed']
-        if data['sentiment'] not in valid_sentiments:
-            errors.append(f"Invalid sentiment. Must be one of: {', '.join(valid_sentiments)}")
+    # Validate call object
+    if 'call' in data:
+        call_data = data['call']
+        if not isinstance(call_data, dict):
+            errors.append("call must be an object")
+        else:
+            # Validate required call fields
+            call_required_fields = ['call_id']
+            for field in call_required_fields:
+                if field not in call_data:
+                    errors.append(f"Missing required call field: {field}")
+            
+            # Validate call_id format
+            if 'call_id' in call_data and not isinstance(call_data['call_id'], str):
+                errors.append("call_id must be a string")
+            
+            # Validate timestamps if present
+            if 'start_timestamp' in call_data:
+                if not isinstance(call_data['start_timestamp'], (int, float)) or call_data['start_timestamp'] < 0:
+                    errors.append("start_timestamp must be a non-negative number")
+            
+            if 'end_timestamp' in call_data:
+                if not isinstance(call_data['end_timestamp'], (int, float)) or call_data['end_timestamp'] < 0:
+                    errors.append("end_timestamp must be a non-negative number")
     
     return len(errors) == 0, errors
 
@@ -91,7 +96,7 @@ def validate_airtable_record(data: Dict[str, Any]) -> tuple[bool, List[str]]:
 
 def sanitize_webhook_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Sanitize webhook data for safe storage
+    Sanitize Retell AI webhook data for safe storage
     
     Args:
         data: Raw webhook data
@@ -101,38 +106,58 @@ def sanitize_webhook_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     sanitized = {}
     
-    # Define field mappings and sanitization rules
-    field_mappings = {
-        'event_type': str,
-        'call_id': str,
-        'agent_id': str,
-        'customer_id': str,
-        'status': str,
-        'transcript': str,
-        'summary': str,
-        'sentiment': str,
-        'duration': (int, float),
-        'cost': (int, float)
-    }
+    # Sanitize top-level fields
+    if 'event' in data:
+        sanitized['event'] = str(data['event'])
     
-    for field, expected_type in field_mappings.items():
-        if field in data:
-            value = data[field]
-            
-            # Type conversion and validation
-            try:
-                if isinstance(expected_type, tuple):
-                    # Handle multiple allowed types
-                    if any(isinstance(value, t) for t in expected_type):
-                        sanitized[field] = value
+    # Sanitize call object
+    if 'call' in data and isinstance(data['call'], dict):
+        call_data = data['call']
+        sanitized_call = {}
+        
+        # Define call field mappings and sanitization rules
+        call_field_mappings = {
+            'call_id': str,
+            'agent_id': str,
+            'call_type': str,
+            'from_number': str,
+            'to_number': str,
+            'direction': str,
+            'call_status': str,
+            'disconnection_reason': str,
+            'transcript': str,
+            'start_timestamp': (int, float),
+            'end_timestamp': (int, float),
+            'opt_out_sensitive_data_storage': bool
+        }
+        
+        for field, expected_type in call_field_mappings.items():
+            if field in call_data:
+                value = call_data[field]
+                
+                # Type conversion and validation
+                try:
+                    if isinstance(expected_type, tuple):
+                        # Handle multiple allowed types
+                        if any(isinstance(value, t) for t in expected_type):
+                            sanitized_call[field] = value
+                        else:
+                            # Try to convert to first type in tuple
+                            sanitized_call[field] = expected_type[0](value)
                     else:
-                        # Try to convert to first type in tuple
-                        sanitized[field] = expected_type[0](value)
-                else:
-                    sanitized[field] = expected_type(value)
-            except (ValueError, TypeError):
-                # Skip invalid fields
-                continue
+                        sanitized_call[field] = expected_type(value)
+                except (ValueError, TypeError):
+                    # Skip invalid fields
+                    continue
+        
+        # Handle complex objects (metadata, dynamic variables)
+        if 'metadata' in call_data and isinstance(call_data['metadata'], dict):
+            sanitized_call['metadata'] = call_data['metadata']
+        
+        if 'retell_llm_dynamic_variables' in call_data and isinstance(call_data['retell_llm_dynamic_variables'], dict):
+            sanitized_call['retell_llm_dynamic_variables'] = call_data['retell_llm_dynamic_variables']
+        
+        sanitized['call'] = sanitized_call
     
     return sanitized
 
