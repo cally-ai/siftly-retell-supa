@@ -425,16 +425,16 @@ class WebhookService:
                 'call_status': webhook_data['call_status'],
                 'disconnection_reason': webhook_data['disconnection_reason'],
                 'transcript': webhook_data['transcript'],
-                'transcript_object': str(webhook_data.get('transcript_object', [])),
-                'transcript_with_tool_calls': str(webhook_data.get('transcript_with_tool_calls', [])),
+                'transcript_object': json.dumps(webhook_data.get('transcript_object', [])),
+                'transcript_with_tool_calls': json.dumps(webhook_data.get('transcript_with_tool_calls', [])),
                 'start_timestamp': webhook_data['start_timestamp'],
                 'end_timestamp': webhook_data['end_timestamp'],
                 'duration_ms': webhook_data.get('duration_ms', 0),
-                'metadata': str(webhook_data['metadata']),
-                'retell_llm_dynamic_variables': str(webhook_data['retell_llm_dynamic_variables']),
-                'collected_dynamic_variables': str(webhook_data.get('collected_dynamic_variables', {})),
-                'recording_url': webhook_data.get('recording_url', ''),
-                'call_cost': str(webhook_data.get('call_cost', {})),
+                'metadata': json.dumps(webhook_data['metadata']),
+                'retell_llm_dynamic_variables': json.dumps(webhook_data['retell_llm_dynamic_variables']),
+                'collected_dynamic_variables': json.dumps(webhook_data.get('collected_dynamic_variables', {})),
+                'recording_url': webhook_data.get('recording_url', '').strip() if webhook_data.get('recording_url') else '',
+                'call_cost': json.dumps(webhook_data.get('call_cost', {})),
                 'opt_out_sensitive_data_storage': str(webhook_data.get('opt_out_sensitive_data_storage', False)).lower()
             }
             
@@ -445,8 +445,11 @@ class WebhookService:
             logger.info(f"Direction: {airtable_record['direction']}")
             logger.info(f"Call Status: {airtable_record['call_status']}")
             logger.info(f"Duration (ms): {airtable_record.get('duration_ms', 0)}")
-            logger.info(f"Recording URL: {airtable_record.get('recording_url', 'N/A')}")
-            logger.info(f"Call Cost: {airtable_record.get('call_cost', 'N/A')}")
+            logger.info(f"Recording URL (raw): {webhook_data.get('recording_url', 'N/A')}")
+            logger.info(f"Recording URL (length): {len(webhook_data.get('recording_url', ''))}")
+            logger.info(f"Recording URL (saved): {airtable_record.get('recording_url', 'N/A')}")
+            logger.info(f"Call Cost (raw): {webhook_data.get('call_cost', 'N/A')}")
+            logger.info(f"Call Cost (JSON): {airtable_record.get('call_cost', 'N/A')}")
             logger.info(f"Collected Dynamic Variables: {airtable_record.get('collected_dynamic_variables', 'N/A')}")
             logger.info(f"Transcript length: {len(airtable_record['transcript']) if airtable_record['transcript'] else 0}")
             logger.info(f"Transcript object present: {'transcript_object' in airtable_record and airtable_record['transcript_object'] != '[]'}")
