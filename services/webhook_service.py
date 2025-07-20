@@ -297,6 +297,15 @@ class WebhookService:
         # Extract call object from Retell webhook format
         call_data = data.get('call', {})
         
+        # Log recording URL extraction
+        recording_url = call_data.get('recording_url', '')
+        logger.info(f"=== EXTRACTING RECORDING URL ===")
+        logger.info(f"Call data keys: {list(call_data.keys())}")
+        logger.info(f"Recording URL in call_data: {recording_url}")
+        logger.info(f"Recording URL type: {type(recording_url)}")
+        logger.info(f"Recording URL length: {len(recording_url) if recording_url else 0}")
+        logger.info(f"=== END EXTRACTING RECORDING URL ===")
+        
         # Calculate duration from timestamps
         start_timestamp = call_data.get('start_timestamp', 0)
         end_timestamp = call_data.get('end_timestamp', 0)
@@ -447,8 +456,11 @@ class WebhookService:
             logger.info(f"Call Status: {airtable_record['call_status']}")
             logger.info(f"Duration (ms): {airtable_record.get('duration_ms', 0)}")
             logger.info(f"Recording URL (raw): {webhook_data.get('recording_url', 'N/A')}")
+            logger.info(f"Recording URL (raw type): {type(webhook_data.get('recording_url', 'N/A'))}")
             logger.info(f"Recording URL (length): {len(webhook_data.get('recording_url', ''))}")
             logger.info(f"Recording URL (saved): {airtable_record.get('recording_url', 'N/A')}")
+            logger.info(f"Recording URL (saved type): {type(airtable_record.get('recording_url', 'N/A'))}")
+            logger.info(f"Recording URL (saved length): {len(airtable_record.get('recording_url', ''))}")
             logger.info(f"Call Cost (raw): {webhook_data.get('call_cost', 'N/A')}")
             logger.info(f"Call Cost (JSON): {airtable_record.get('call_cost', 'N/A')}")
             logger.info(f"Collected Dynamic Variables: {airtable_record.get('collected_dynamic_variables', 'N/A')}")
