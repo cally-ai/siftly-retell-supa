@@ -187,6 +187,8 @@ def sanitize_webhook_data(data: Dict[str, Any]) -> Dict[str, Any]:
             'transcript': str,
             'start_timestamp': (int, float),
             'end_timestamp': (int, float),
+            'duration_ms': (int, float),
+            'recording_url': str,
             'opt_out_sensitive_data_storage': bool
         }
         
@@ -215,6 +217,18 @@ def sanitize_webhook_data(data: Dict[str, Any]) -> Dict[str, Any]:
         
         if 'retell_llm_dynamic_variables' in call_data and isinstance(call_data['retell_llm_dynamic_variables'], dict):
             sanitized_call['retell_llm_dynamic_variables'] = call_data['retell_llm_dynamic_variables']
+        
+        if 'collected_dynamic_variables' in call_data and isinstance(call_data['collected_dynamic_variables'], dict):
+            sanitized_call['collected_dynamic_variables'] = call_data['collected_dynamic_variables']
+        
+        if 'call_cost' in call_data and isinstance(call_data['call_cost'], dict):
+            sanitized_call['call_cost'] = call_data['call_cost']
+        
+        if 'transcript_object' in call_data and isinstance(call_data['transcript_object'], list):
+            sanitized_call['transcript_object'] = call_data['transcript_object']
+        
+        if 'transcript_with_tool_calls' in call_data and isinstance(call_data['transcript_with_tool_calls'], list):
+            sanitized_call['transcript_with_tool_calls'] = call_data['transcript_with_tool_calls']
         
         sanitized['call'] = sanitized_call
     
