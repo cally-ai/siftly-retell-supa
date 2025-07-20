@@ -297,14 +297,22 @@ class WebhookService:
         # Extract call object from Retell webhook format
         call_data = data.get('call', {})
         
-        # Log recording URL extraction
-        recording_url = call_data.get('recording_url', '')
-        logger.info(f"=== EXTRACTING RECORDING URL ===")
+        # Log all available fields for debugging
+        logger.info(f"=== EXTRACTING FIELDS ===")
         logger.info(f"Call data keys: {list(call_data.keys())}")
-        logger.info(f"Recording URL in call_data: {recording_url}")
-        logger.info(f"Recording URL type: {type(recording_url)}")
-        logger.info(f"Recording URL length: {len(recording_url) if recording_url else 0}")
-        logger.info(f"=== END EXTRACTING RECORDING URL ===")
+        logger.info(f"Raw data keys: {list(data.keys())}")
+        
+        # Check for fields that might be at different levels
+        recording_url = call_data.get('recording_url', '')
+        duration_ms = call_data.get('duration_ms', 0)
+        collected_dynamic_variables = call_data.get('collected_dynamic_variables', {})
+        call_cost = call_data.get('call_cost', {})
+        
+        logger.info(f"Recording URL: {recording_url}")
+        logger.info(f"Duration MS: {duration_ms}")
+        logger.info(f"Collected Dynamic Variables: {collected_dynamic_variables}")
+        logger.info(f"Call Cost: {call_cost}")
+        logger.info(f"=== END EXTRACTING FIELDS ===")
         
         # Calculate duration from timestamps
         start_timestamp = call_data.get('start_timestamp', 0)
