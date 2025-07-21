@@ -76,7 +76,8 @@ class WebhookService:
         # Add processing insights
         processed_data = self._add_insights(webhook_data)
         
-        # Save to Airtable
+        # Save to Airtable (only for call_analyzed events)
+        logger.info(f"Processing event type: {processed_data.get('event_type', 'unknown')}")
         self._save_to_airtable(processed_data)
         
         # Perform additional processing based on event type
@@ -319,6 +320,10 @@ class WebhookService:
         end_timestamp = call_data.get('end_timestamp', 0)
         duration_seconds = (end_timestamp - start_timestamp) / 1000 if end_timestamp > start_timestamp else 0
         
+        # Extract twilio_call_sid from telephony_identifier
+        telephony_identifier = call_data.get('telephony_identifier', {})
+        twilio_call_sid = telephony_identifier.get('twilio_call_sid', '')
+        
         return {
             'timestamp': datetime.now().isoformat(),
             'raw_data': data,
@@ -343,7 +348,9 @@ class WebhookService:
             'collected_dynamic_variables': call_data.get('collected_dynamic_variables', {}),
             'recording_url': call_data.get('recording_url', ''),
             'call_cost': call_data.get('call_cost', {}),
-            'opt_out_sensitive_data_storage': call_data.get('opt_out_sensitive_data_storage', False)
+            'opt_out_sensitive_data_storage': call_data.get('opt_out_sensitive_data_storage', False),
+            'call_analysis': call_data.get('call_analysis', {}),
+            'twilio_call_sid': twilio_call_sid
         }
     
     def _add_insights(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -426,6 +433,12 @@ class WebhookService:
         Returns:
             True if successful, False otherwise
         """
+        # Only save call details when event is "call_analyzed"
+        event_type = webhook_data.get('event_type', 'unknown')
+        if event_type != 'call_analyzed':
+            logger.info(f"Skipping Airtable save for event type: {event_type} (only saving 'call_analyzed' events)")
+            return True  # Return True since this is expected behavior
+        
         if not airtable_service.is_configured():
             logger.warning("Airtable not configured, skipping save")
             return False
@@ -453,7 +466,9 @@ class WebhookService:
                 'collected_dynamic_variables': json.dumps(webhook_data.get('collected_dynamic_variables', {})),
                 'recording_url': webhook_data.get('recording_url', '').strip() if webhook_data.get('recording_url') else '',
                 'call_cost': json.dumps(webhook_data.get('call_cost', {})),
-                'opt_out_sensitive_data_storage': str(webhook_data.get('opt_out_sensitive_data_storage', False)).lower()
+                'opt_out_sensitive_data_storage': str(webhook_data.get('opt_out_sensitive_data_storage', False)).lower(),
+                'call_analysis': json.dumps(webhook_data.get('call_analysis', {})),
+                'twilio_call_sid': webhook_data.get('twilio_call_sid', '')
             }
             
             logger.info(f"=== SAVING TO AIRTABLE ===")
@@ -476,6 +491,8 @@ class WebhookService:
             logger.info(f"Transcript object present: {'transcript_object' in airtable_record and airtable_record['transcript_object'] != '[]'}")
             logger.info(f"Transcript with tool calls present: {'transcript_with_tool_calls' in airtable_record and airtable_record['transcript_with_tool_calls'] != '[]'}")
             logger.info(f"opt_out_sensitive_data_storage: {airtable_record['opt_out_sensitive_data_storage']} (type: {type(airtable_record['opt_out_sensitive_data_storage'])})")
+            logger.info(f"Call Analysis present: {'call_analysis' in airtable_record and airtable_record['call_analysis'] != '{}'}")
+            logger.info(f"Twilio Call SID: {airtable_record.get('twilio_call_sid', 'N/A')}")
             logger.info(f"=== END AIRTABLE SAVE ===")
             
             record = airtable_service.create_record(airtable_record)

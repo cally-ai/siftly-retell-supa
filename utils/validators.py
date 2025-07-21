@@ -230,6 +230,12 @@ def sanitize_webhook_data(data: Dict[str, Any]) -> Dict[str, Any]:
         if 'transcript_with_tool_calls' in call_data and isinstance(call_data['transcript_with_tool_calls'], list):
             sanitized_call['transcript_with_tool_calls'] = call_data['transcript_with_tool_calls']
         
+        if 'call_analysis' in call_data and isinstance(call_data['call_analysis'], dict):
+            sanitized_call['call_analysis'] = call_data['call_analysis']
+        
+        if 'telephony_identifier' in call_data and isinstance(call_data['telephony_identifier'], dict):
+            sanitized_call['telephony_identifier'] = call_data['telephony_identifier']
+        
         sanitized['call'] = sanitized_call
     
     return sanitized
