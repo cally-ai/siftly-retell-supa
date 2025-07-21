@@ -324,6 +324,9 @@ class WebhookService:
         telephony_identifier = call_data.get('telephony_identifier', {})
         twilio_call_sid = telephony_identifier.get('twilio_call_sid', '')
         
+        # Generate node-based transcript summary
+        node_transcript = self._generate_node_transcript(call_data.get('transcript_with_tool_calls', []))
+        
         return {
             'timestamp': datetime.now().isoformat(),
             'raw_data': data,
@@ -350,8 +353,106 @@ class WebhookService:
             'call_cost': call_data.get('call_cost', {}),
             'opt_out_sensitive_data_storage': call_data.get('opt_out_sensitive_data_storage', False),
             'call_analysis': call_data.get('call_analysis', {}),
-            'twilio_call_sid': twilio_call_sid
+            'twilio_call_sid': twilio_call_sid,
+            'node_transcript': node_transcript
         }
+    
+    def _generate_node_transcript(self, transcript_with_tool_calls: List[Dict[str, Any]]) -> str:
+        """
+        Generate a human-readable, node-based summary of the call transcript with timestamps
+        
+        Args:
+            transcript_with_tool_calls: List of transcript steps from Retell AI
+        
+        Returns:
+            Formatted string with node-based transcript summary
+        """
+        if not transcript_with_tool_calls:
+            return ""
+        
+        node_summaries = []
+        current_node = "begin"
+        node_start = None
+        node_end = None
+        buffer = []
+        
+        logger.info(f"=== GENERATING NODE TRANSCRIPT ===")
+        logger.info(f"Total transcript steps: {len(transcript_with_tool_calls)}")
+        
+        # Loop over transcript entries
+        for step in transcript_with_tool_calls:
+            if step.get('role') == "node_transition":
+                # If ending a node, finalize it
+                if buffer and node_start is not None and node_end is not None:
+                    node_summary = f"[Node: {current_node}] (Start: {node_start:.4f}s - End: {node_end:.4f}s)\n" + "\n".join(buffer)
+                    node_summaries.append(node_summary)
+                    logger.info(f"Finalized node: {current_node} ({node_start:.4f}s - {node_end:.4f}s)")
+                
+                # Transition to the new node
+                current_node = step.get('new_node_name', 'unknown')
+                buffer = []
+                node_start = None
+                node_end = None
+                logger.info(f"Transitioning to node: {current_node}")
+                continue
+            
+            if step.get('role') == "agent" and step.get('words'):
+                # Use first and last word for timestamp range
+                words = step['words']
+                if words:
+                    first = words[0]
+                    last = words[-1]
+                    node_start = node_start or first.get('start', 0)
+                    node_end = last.get('end', 0)
+                    buffer.append(f'Agent: "{step.get("content", "")}"')
+                    logger.info(f"Agent speech: {len(words)} words, time range: {first.get('start', 0):.4f}s - {last.get('end', 0):.4f}s")
+            
+            if step.get('role') == "dtmf":
+                buffer.append(f'User: Pressed DTMF "{step.get("digit", "")}"')
+                logger.info(f"DTMF input: {step.get('digit', '')}")
+            
+            if step.get('role') == "tool_call_invocation":
+                tool_name = step.get('name', '')
+                if tool_name == "extract_dynamic_variables":
+                    try:
+                        args = json.loads(step.get('arguments', '{}'))
+                        detected = next((arg for arg in args if arg.get('name') == "caller_language"), None)
+                        if detected:
+                            buffer.append("System: Detected language as Dutch")
+                            logger.info("Language detection: Dutch")
+                    except (json.JSONDecodeError, KeyError):
+                        logger.warning("Failed to parse extract_dynamic_variables arguments")
+                
+                elif tool_name == "agent_swap":
+                    try:
+                        args = json.loads(step.get('arguments', '{}'))
+                        agent_id = args.get('agentId', 'unknown')
+                        buffer.append(f"System: Swapped to Dutch agent ({agent_id})")
+                        logger.info(f"Agent swap: {agent_id}")
+                    except (json.JSONDecodeError, KeyError):
+                        logger.warning("Failed to parse agent_swap arguments")
+            
+            if step.get('role') == "tool_call_result" and step.get('content', '').find("transferred") != -1:
+                try:
+                    content = json.loads(step.get('content', '{}'))
+                    status = content.get('status', 'Unknown transfer status')
+                    buffer.append(f"System: {status}")
+                    logger.info(f"Transfer result: {status}")
+                except (json.JSONDecodeError, KeyError):
+                    logger.warning("Failed to parse tool_call_result content")
+        
+        # Push final node if any content left
+        if buffer and node_start is not None and node_end is not None:
+            node_summary = f"[Node: {current_node}] (Start: {node_start:.4f}s - End: {node_end:.4f}s)\n" + "\n".join(buffer)
+            node_summaries.append(node_summary)
+            logger.info(f"Finalized final node: {current_node} ({node_start:.4f}s - {node_end:.4f}s)")
+        
+        # Join the full transcript string
+        full_transcript = "\n\n".join(node_summaries)
+        logger.info(f"Generated node transcript with {len(node_summaries)} nodes")
+        logger.info(f"=== END NODE TRANSCRIPT ===")
+        
+        return full_transcript
     
     def _add_insights(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -469,7 +570,8 @@ class WebhookService:
                 'opt_out_sensitive_data_storage': str(webhook_data.get('opt_out_sensitive_data_storage', False)).lower(),
                 'call_analysis': json.dumps(webhook_data.get('call_analysis', {})),
                 'twilio_call_sid': webhook_data.get('twilio_call_sid', ''),
-                'created_time': datetime.now().isoformat()
+                'created_time': datetime.now().isoformat(),
+                'node_transcript': webhook_data.get('node_transcript', '')
             }
             
             logger.info(f"=== SAVING TO AIRTABLE ===")
@@ -495,6 +597,8 @@ class WebhookService:
             logger.info(f"Call Analysis present: {'call_analysis' in airtable_record and airtable_record['call_analysis'] != '{}'}")
             logger.info(f"Twilio Call SID: {airtable_record.get('twilio_call_sid', 'N/A')}")
             logger.info(f"Created Time: {airtable_record.get('created_time', 'N/A')}")
+            logger.info(f"Node Transcript length: {len(airtable_record.get('node_transcript', ''))}")
+            logger.info(f"Node Transcript present: {bool(airtable_record.get('node_transcript', ''))}")
             logger.info(f"=== END AIRTABLE SAVE ===")
             
             record = airtable_service.create_record(airtable_record)
