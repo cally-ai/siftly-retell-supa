@@ -5,7 +5,7 @@ import requests
 import tempfile
 import os
 from typing import Optional
-from openai import OpenAI
+import openai
 from config import Config
 from utils.logger import get_logger
 
@@ -34,10 +34,10 @@ class WhisperService:
             self.client = None
         else:
             try:
-                # Initialize OpenAI client directly with API key
-                logger.info("Attempting to initialize OpenAI client...")
-                from openai import OpenAI
-                self.client = OpenAI(api_key=self.api_key)
+                # Configure OpenAI client via global api_key
+                logger.info("Configuring OpenAI client via global api_key...")
+                openai.api_key = self.api_key
+                self.client = openai
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Whisper service: {e}")
