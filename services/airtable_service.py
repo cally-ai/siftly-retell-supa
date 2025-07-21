@@ -275,12 +275,11 @@ class AirtableService:
             
             logger.info(f"Generated filename: {filename}")
             
-            # For Airtable attachments, we can directly use the URL
-            # Airtable supports external URLs for attachments
+            # For Airtable attachments, we need to use the correct format
+            # Airtable attachment format: [{"url": "url", "filename": "name"}]
             attachment_data = {
                 'url': recording_url,
-                'filename': filename,
-                'type': 'audio/wav'
+                'filename': filename
             }
             
             # Update the record with the attachment
