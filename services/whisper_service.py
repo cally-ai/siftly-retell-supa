@@ -34,9 +34,10 @@ class WhisperService:
             self.client = None
         else:
             try:
-                # Initialize OpenAI client with minimal configuration
+                # Set the API key in environment for OpenAI client
                 logger.info("Attempting to initialize OpenAI client...")
-                self.client = OpenAI(api_key=self.api_key)
+                os.environ["OPENAI_API_KEY"] = self.api_key
+                self.client = OpenAI()
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Whisper service: {e}")
