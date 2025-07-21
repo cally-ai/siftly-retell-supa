@@ -37,6 +37,8 @@ class WhisperService:
                 # Configure OpenAI client via global api_key
                 logger.info("Configuring OpenAI client via global api_key...")
                 openai.api_key = self.api_key
+                openai.organization = "org-lBrZYqj9NS6IejNMvFcZ1kBS"
+                openai.project = "proj_6pltaNep8SDLiRKaFlCTjBrU"
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Whisper service: {e}")
