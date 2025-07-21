@@ -34,9 +34,10 @@ class WhisperService:
             self.client = None
         else:
             try:
-                # Set the API key in environment for OpenAI client
+                # Set the API key in environment for OpenAI client (only if not already set)
                 logger.info("Attempting to initialize OpenAI client...")
-                os.environ["OPENAI_API_KEY"] = self.api_key
+                if "OPENAI_API_KEY" not in os.environ:
+                    os.environ["OPENAI_API_KEY"] = self.api_key
                 self.client = OpenAI()
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
@@ -48,7 +49,11 @@ class WhisperService:
         """Check if Whisper service is properly configured"""
         return self.client is not None
     
-    def transcribe_audio_url(self, audio_url: str, language: str = None, prompt: str = None) -> Optional[str]:
+    def __repr__(self):
+        """String representation for debugging"""
+        return f"<WhisperService configured={self.is_configured()}>"
+    
+    def transcribe_audio_url(self, audio_url: str, language: str = None, prompt: str = None, model: str = "whisper-1") -> Optional[str]:
         """
         Transcribe audio from URL using OpenAI Whisper
         
@@ -90,7 +95,7 @@ class WhisperService:
                 logger.info("Sending audio to OpenAI Whisper API")
                 
                 transcript = self.client.audio.transcriptions.create(
-                    model="whisper-1",
+                    model=model,
                     file=temp_file,
                     language=language,  # Will auto-detect if None
                     prompt=prompt,  # Optional prompt for domain-specific terms
@@ -110,7 +115,7 @@ class WhisperService:
             logger.error(f"Error during Whisper transcription: {e}")
             return None
     
-    def transcribe_audio_file(self, file_path: str, language: str = None, prompt: str = None) -> Optional[str]:
+    def transcribe_audio_file(self, file_path: str, language: str = None, prompt: str = None, model: str = "whisper-1") -> Optional[str]:
         """
         Transcribe audio from local file using OpenAI Whisper
         
@@ -139,7 +144,7 @@ class WhisperService:
             
             with open(file_path, 'rb') as audio_file:
                 transcript = self.client.audio.transcriptions.create(
-                    model="whisper-1",
+                    model=model,
                     file=audio_file,
                     language=language,  # Will auto-detect if None
                     prompt=prompt,  # Optional prompt for domain-specific terms
