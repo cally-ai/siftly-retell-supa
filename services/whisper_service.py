@@ -104,9 +104,9 @@ class WhisperService:
                 logger.info(f"Client configured: {self.client is not None}")
                 logger.info(f"=== END WHISPER DEBUG INFO ===")
                 
-                # Use module-level client with new API syntax
+                # Use old API syntax with v0.28.1
                 logger.debug(f"Using model: {model}")
-                transcript = self.client.audio.transcriptions.create(
+                transcript = self.client.Audio.transcribe(
                     model=model,
                     file=temp_file,
                     language=language,  # Will auto-detect if None
@@ -165,9 +165,9 @@ class WhisperService:
                 logger.info(f"Client configured: {self.client is not None}")
                 logger.info(f"=== END WHISPER DEBUG INFO (FILE) ===")
                 
-                # Use module-level client with new API syntax
+                # Use old API syntax with v0.28.1
                 logger.debug(f"Using model: {model}")
-                transcript = self.client.audio.transcriptions.create(
+                transcript = self.client.Audio.transcribe(
                     model=model,
                     file=audio_file,
                     language=language,  # Will auto-detect if None
