@@ -34,12 +34,14 @@ class WhisperService:
             # No need to set self.client since we don't use it anymore
         else:
             try:
-                # Initialize OpenAI client with API key and optional organization
-                logger.info("Initializing OpenAI client with API key...")
-                self.client = OpenAI(
-                    api_key=self.api_key,
-                    organization="org-lBrZYqj9NS6IejNMvFcZ1kBS"  # Optional: for team org context
-                )
+                # Set environment variables to avoid global config conflicts
+                logger.info("Setting environment variables for OpenAI client...")
+                os.environ["OPENAI_API_KEY"] = self.api_key
+                os.environ["OPENAI_ORG"] = "org-lBrZYqj9NS6IejNMvFcZ1kBS"
+                
+                # Initialize OpenAI client without parameters
+                logger.info("Initializing OpenAI client...")
+                self.client = OpenAI()
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Whisper service: {e}")
