@@ -468,7 +468,8 @@ class WebhookService:
                 'call_cost': json.dumps(webhook_data.get('call_cost', {})),
                 'opt_out_sensitive_data_storage': str(webhook_data.get('opt_out_sensitive_data_storage', False)).lower(),
                 'call_analysis': json.dumps(webhook_data.get('call_analysis', {})),
-                'twilio_call_sid': webhook_data.get('twilio_call_sid', '')
+                'twilio_call_sid': webhook_data.get('twilio_call_sid', ''),
+                'created_time': datetime.now().isoformat()
             }
             
             logger.info(f"=== SAVING TO AIRTABLE ===")
@@ -493,6 +494,7 @@ class WebhookService:
             logger.info(f"opt_out_sensitive_data_storage: {airtable_record['opt_out_sensitive_data_storage']} (type: {type(airtable_record['opt_out_sensitive_data_storage'])})")
             logger.info(f"Call Analysis present: {'call_analysis' in airtable_record and airtable_record['call_analysis'] != '{}'}")
             logger.info(f"Twilio Call SID: {airtable_record.get('twilio_call_sid', 'N/A')}")
+            logger.info(f"Created Time: {airtable_record.get('created_time', 'N/A')}")
             logger.info(f"=== END AIRTABLE SAVE ===")
             
             record = airtable_service.create_record(airtable_record)
