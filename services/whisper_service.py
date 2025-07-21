@@ -5,7 +5,7 @@ import requests
 import tempfile
 import os
 from typing import Optional
-from openai import OpenAI, APIError
+import openai
 from config import Config
 from utils.logger import get_logger
 
@@ -34,14 +34,14 @@ class WhisperService:
             # No need to set self.client since we don't use it anymore
         else:
             try:
-                # Set environment variables to avoid global config conflicts
-                logger.info("Setting environment variables for OpenAI client...")
-                os.environ["OPENAI_API_KEY"] = self.api_key
-                os.environ["OPENAI_ORG"] = "org-lBrZYqj9NS6IejNMvFcZ1kBS"
+                # Use module-based approach to avoid constructor issues
+                logger.info("Setting OpenAI API key via module...")
+                openai.api_key = self.api_key
+                openai.organization = "org-lBrZYqj9NS6IejNMvFcZ1kBS"
                 
-                # Initialize OpenAI client without parameters
-                logger.info("Initializing OpenAI client...")
-                self.client = OpenAI()
+                # Test the configuration
+                logger.info("Testing OpenAI configuration...")
+                self.client = openai
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Whisper service: {e}")
@@ -104,9 +104,9 @@ class WhisperService:
                 logger.info(f"Client configured: {self.client is not None}")
                 logger.info(f"=== END WHISPER DEBUG INFO ===")
                 
-                # Use OpenAI client for v1.14.0 SDK
+                # Use OpenAI module for v1.14.0 SDK
                 logger.debug(f"Using model: {model}")
-                transcript = self.client.audio.transcriptions.create(
+                transcript = self.client.Audio.transcribe(
                     model=model,
                     file=temp_file,
                     language=language,  # Will auto-detect if None
@@ -123,7 +123,7 @@ class WhisperService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to download audio from {audio_url}: {e}")
             return None
-        except APIError as e:
+        except openai.APIError as e:
             logger.error(f"OpenAI API error during transcription: {e}")
             return None
         except Exception as e:
@@ -165,9 +165,9 @@ class WhisperService:
                 logger.info(f"Client configured: {self.client is not None}")
                 logger.info(f"=== END WHISPER DEBUG INFO (FILE) ===")
                 
-                # Use OpenAI client for v1.14.0 SDK
+                # Use OpenAI module for v1.14.0 SDK
                 logger.debug(f"Using model: {model}")
-                transcript = self.client.audio.transcriptions.create(
+                transcript = self.client.Audio.transcribe(
                     model=model,
                     file=audio_file,
                     language=language,  # Will auto-detect if None
@@ -181,7 +181,7 @@ class WhisperService:
             
             return transcription_text
             
-        except APIError as e:
+        except openai.APIError as e:
             logger.error(f"OpenAI API error during transcription: {e}")
             return None
         except Exception as e:
