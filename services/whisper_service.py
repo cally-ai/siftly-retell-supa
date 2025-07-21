@@ -31,22 +31,21 @@ class WhisperService:
         
         if not self.api_key:
             logger.warning("OpenAI API key not provided. Whisper service will be disabled.")
-            self.client = None
+            # No need to set self.client since we don't use it anymore
         else:
             try:
                 # Configure OpenAI client via global api_key
                 logger.info("Configuring OpenAI client via global api_key...")
                 openai.api_key = self.api_key
-                self.client = openai
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Whisper service: {e}")
                 logger.error(f"Error details: {type(e).__name__}: {str(e)}")
-                self.client = None
+                self.api_key = None  # Mark as not configured
     
     def is_configured(self) -> bool:
         """Check if Whisper service is properly configured"""
-        return self.client is not None
+        return self.api_key is not None
     
     def __repr__(self):
         """String representation for debugging"""
@@ -93,7 +92,11 @@ class WhisperService:
                 # Transcribe using OpenAI Whisper
                 logger.info("Sending audio to OpenAI Whisper API")
                 
-                transcript = self.client.audio.transcriptions.create(
+                # Debug: Check API key status
+                logger.debug(f"API key configured: {self.api_key is not None}")
+                
+                # Use openai module directly to avoid client instance issues
+                transcript = openai.audio.transcriptions.create(
                     model=model,
                     file=temp_file,
                     language=language,  # Will auto-detect if None
@@ -142,7 +145,11 @@ class WhisperService:
             logger.info(f"Local audio file size: {file_size} bytes ({file_size / 1024:.1f} KB)")
             
             with open(file_path, 'rb') as audio_file:
-                transcript = self.client.audio.transcriptions.create(
+                # Debug: Check API key status
+                logger.debug(f"API key configured: {self.api_key is not None}")
+                
+                # Use openai module directly to avoid client instance issues
+                transcript = openai.audio.transcriptions.create(
                     model=model,
                     file=audio_file,
                     language=language,  # Will auto-detect if None
