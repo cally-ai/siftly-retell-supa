@@ -31,6 +31,9 @@ class Config:
     # Retell AI Configuration
     RETELL_WEBHOOK_SECRET = os.getenv('RETELL_WEBHOOK_SECRET')
     
+    # OpenAI Configuration
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    
     # Logging Configuration
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
