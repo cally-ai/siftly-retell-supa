@@ -10,6 +10,15 @@ from routes.health_routes import health_bp
 from routes.webhook_routes import webhook_bp
 from routes.airtable_routes import airtable_bp
 
+# Version check for debugging
+try:
+    import openai
+    print(f"=== OPENAI SDK VERSION: {openai.__version__} ===")
+except ImportError:
+    print("=== OPENAI SDK: NOT INSTALLED ===")
+except Exception as e:
+    print(f"=== OPENAI SDK VERSION CHECK ERROR: {e} ===")
+
 def create_app(config_name=None):
     """
     Application factory pattern for creating Flask app
