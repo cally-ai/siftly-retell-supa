@@ -34,8 +34,9 @@ class WhisperService:
             self.client = None
         else:
             try:
-                # Initialize OpenAI client with API key
+                # Initialize OpenAI client directly with API key
                 logger.info("Attempting to initialize OpenAI client...")
+                from openai import OpenAI
                 self.client = OpenAI(api_key=self.api_key)
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
@@ -92,7 +93,7 @@ class WhisperService:
                 # Transcribe using OpenAI Whisper
                 logger.info("Sending audio to OpenAI Whisper API")
                 
-                transcript = self.client.audio.transcribe(
+                transcript = self.client.audio.transcriptions.create(
                     model=model,
                     file=temp_file,
                     language=language,  # Will auto-detect if None
@@ -141,7 +142,7 @@ class WhisperService:
             logger.info(f"Local audio file size: {file_size} bytes ({file_size / 1024:.1f} KB)")
             
             with open(file_path, 'rb') as audio_file:
-                transcript = self.client.audio.transcribe(
+                transcript = self.client.audio.transcriptions.create(
                     model=model,
                     file=audio_file,
                     language=language,  # Will auto-detect if None
