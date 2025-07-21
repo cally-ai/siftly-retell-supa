@@ -106,7 +106,7 @@ class WhisperService:
                 
                 # Use OpenAI module for v1.14.0 SDK
                 logger.debug(f"Using model: {model}")
-                transcript = self.client.Audio.transcribe(
+                transcript = self.client.audio.transcriptions.create(
                     model=model,
                     file=temp_file,
                     language=language,  # Will auto-detect if None
@@ -167,7 +167,7 @@ class WhisperService:
                 
                 # Use OpenAI module for v1.14.0 SDK
                 logger.debug(f"Using model: {model}")
-                transcript = self.client.Audio.transcribe(
+                transcript = self.client.audio.transcriptions.create(
                     model=model,
                     file=audio_file,
                     language=language,  # Will auto-detect if None
