@@ -291,55 +291,27 @@ class AirtableService:
                 # Upload to Airtable as attachment
                 logger.info(f"Uploading recording to Airtable record: {record_id}")
                 
-                # For Airtable attachments, we need to use their file upload API
-                # First, upload the file to Airtable's servers
-                logger.info(f"Uploading file to Airtable servers: {filename}")
+                # For Airtable attachments, we use URL references
+                # Airtable will download and store the file from the URL
+                logger.info(f"Adding recording URL to Airtable attachment field: {filename}")
                 
-                # Use Airtable's file upload endpoint
-                upload_url = f"https://api.airtable.com/v0/meta/bases/{self.base_id}/files"
-                headers = {
-                    'Authorization': f'Bearer {self.api_key}',
-                    'Content-Type': 'application/octet-stream'
+                # Create attachment data with URL (Airtable will download and store the file)
+                attachment_data = {
+                    'url': recording_url,
+                    'filename': filename
                 }
                 
-                with open(temp_file_path, 'rb') as file:
-                    upload_response = requests.post(
-                        upload_url,
-                        data=file,
-                        headers=headers,
-                        params={'filename': filename}
-                    )
+                update_data = {
+                    'recording_file': [attachment_data]
+                }
                 
-                if upload_response.status_code == 200:
-                    upload_data = upload_response.json()
-                    file_id = upload_data.get('id')
-                    
-                    if file_id:
-                        logger.info(f"File uploaded to Airtable, ID: {file_id}")
-                        
-                        # Now attach the uploaded file to the record
-                        attachment_data = {
-                            'id': file_id,
-                            'filename': filename
-                        }
-                        
-                        update_data = {
-                            'recording_file': [attachment_data]
-                        }
-                        
-                        updated_record = self.update_record(record_id, update_data)
-                        
-                        if updated_record:
-                            logger.info(f"Successfully attached uploaded file to record: {record_id}")
-                            return True
-                        else:
-                            logger.error(f"Failed to attach uploaded file to record: {record_id}")
-                            return False
-                    else:
-                        logger.error("No file ID returned from Airtable upload")
-                        return False
+                updated_record = self.update_record(record_id, update_data)
+                
+                if updated_record:
+                    logger.info(f"Successfully added recording URL to Airtable record: {record_id}")
+                    return True
                 else:
-                    logger.error(f"Failed to upload file to Airtable: {upload_response.status_code} - {upload_response.text}")
+                    logger.error(f"Failed to add recording URL to record: {record_id}")
                     return False
                         
             finally:
