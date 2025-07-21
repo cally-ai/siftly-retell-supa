@@ -34,18 +34,17 @@ class WhisperService:
             # No need to set self.client since we don't use it anymore
         else:
             try:
-                # Initialize OpenAI client with project configuration
-                logger.info("Initializing OpenAI client with project configuration...")
+                # Initialize OpenAI client with API key and organization
+                logger.info("Initializing OpenAI client with API key...")
                 self.client = OpenAI(
                     api_key=self.api_key,
-                    organization="org-lBrZYqj9NS6IejNMvFcZ1kBS",
-                    project="proj_6pltaNep8SDLiRKaFlCTjBrU"
+                    organization="org-lBrZYqj9NS6IejNMvFcZ1kBS"  # optional, safe to include
                 )
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Whisper service: {e}")
                 logger.error(f"Error details: {type(e).__name__}: {str(e)}")
-                self.api_key = None  # Mark as not configured
+                self.client = None
     
     def is_configured(self) -> bool:
         """Check if Whisper service is properly configured"""
