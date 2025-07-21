@@ -1,6 +1,9 @@
 """
 Airtable service for handling all Airtable operations
 """
+import requests
+import tempfile
+import os
 from typing import Dict, Any, List, Optional, Union
 from pyairtable import Api, Base, Table
 from config import Config
@@ -240,6 +243,64 @@ class AirtableService:
         except Exception as e:
             logger.error(f"Failed to batch create records: {e}")
             return []
+    
+    def download_and_upload_recording(self, recording_url: str, record_id: str, call_id: str, created_time: str) -> bool:
+        """
+        Download recording file from URL and upload to Airtable as attachment
+        
+        Args:
+            recording_url: URL of the recording file
+            record_id: Airtable record ID to attach the file to
+            call_id: Call ID for filename
+            created_time: Created time for filename
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.is_configured():
+            logger.error("Airtable service not configured")
+            return False
+        
+        if not recording_url:
+            logger.warning("No recording URL provided")
+            return False
+        
+        try:
+            logger.info(f"Processing recording from: {recording_url}")
+            
+            # Format the filename with call_id and created_time
+            # Remove any special characters from created_time for filename safety
+            safe_created_time = created_time.replace(':', '-').replace('.', '-').replace('T', '_')
+            filename = f"call_{call_id}_{safe_created_time}.wav"
+            
+            logger.info(f"Generated filename: {filename}")
+            
+            # For Airtable attachments, we can directly use the URL
+            # Airtable supports external URLs for attachments
+            attachment_data = {
+                'url': recording_url,
+                'filename': filename,
+                'type': 'audio/wav'
+            }
+            
+            # Update the record with the attachment
+            update_data = {
+                'recording_file': [attachment_data]
+            }
+            
+            logger.info(f"Adding recording attachment to Airtable record: {record_id}")
+            updated_record = self.update_record(record_id, update_data)
+            
+            if updated_record:
+                logger.info(f"Successfully added recording to Airtable record: {record_id}")
+                return True
+            else:
+                logger.error(f"Failed to update record with recording file: {record_id}")
+                return False
+        
+        except Exception as e:
+            logger.error(f"Error processing recording file: {e}")
+            return False
 
 # Global instance
 airtable_service = AirtableService() 

@@ -603,7 +603,25 @@ class WebhookService:
             
             record = airtable_service.create_record(airtable_record)
             if record:
-                logger.info(f"Saved webhook to Airtable: {record.get('id', 'unknown')}")
+                record_id = record.get('id', 'unknown')
+                logger.info(f"Saved webhook to Airtable: {record_id}")
+                
+                # Add recording file attachment if recording_url exists
+                recording_url = webhook_data.get('recording_url', '').strip()
+                if recording_url:
+                    logger.info(f"Processing recording file for record: {record_id}")
+                    call_id = webhook_data.get('call_id', 'unknown')
+                    created_time = airtable_record.get('created_time', '')
+                    recording_success = airtable_service.download_and_upload_recording(
+                        recording_url, record_id, call_id, created_time
+                    )
+                    if recording_success:
+                        logger.info(f"Successfully added recording file to record: {record_id}")
+                    else:
+                        logger.warning(f"Failed to add recording file to record: {record_id}")
+                else:
+                    logger.info(f"No recording URL found for record: {record_id}")
+                
                 return True
             else:
                 logger.error("Failed to save webhook to Airtable")
