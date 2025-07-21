@@ -5,7 +5,7 @@ import requests
 import tempfile
 import os
 from typing import Optional
-from openai import OpenAI
+import openai
 from config import Config
 from utils.logger import get_logger
 
@@ -34,21 +34,20 @@ class WhisperService:
             # No need to set self.client since we don't use it anymore
         else:
             try:
-                # Initialize OpenAI client with API key and organization
-                logger.info("Initializing OpenAI client with API key...")
-                self.client = OpenAI(
-                    api_key=self.api_key,
-                    organization="org-lBrZYqj9NS6IejNMvFcZ1kBS"  # optional, safe to include
-                )
+                # Configure OpenAI module with API key (official approach)
+                logger.info("Configuring OpenAI module with API key...")
+                openai.api_key = self.api_key
+                # Optionally set organization if needed
+                # openai.organization = "org-lBrZYqj9NS6IejNMvFcZ1kBS"
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Whisper service: {e}")
                 logger.error(f"Error details: {type(e).__name__}: {str(e)}")
-                self.client = None
+                self.api_key = None  # Mark as not configured
     
     def is_configured(self) -> bool:
         """Check if Whisper service is properly configured"""
-        return self.client is not None
+        return self.api_key is not None
     
     def __repr__(self):
         """String representation for debugging"""
@@ -87,7 +86,7 @@ class WhisperService:
             logger.info(f"Downloaded audio file size: {file_size} bytes ({file_size / 1024:.1f} KB)")
             
             # Use context manager for automatic cleanup
-            with tempfile.NamedTemporaryFile(suffix='.wav') as temp_file:
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as temp_file:
                 temp_file.write(response.content)
                 temp_file.flush()  # Ensure all data is written
                 temp_file.seek(0)  # Reset file pointer to beginning
@@ -99,13 +98,12 @@ class WhisperService:
                 logger.info(f"=== WHISPER DEBUG INFO ===")
                 logger.info(f"API key configured: {self.api_key is not None}")
                 logger.info(f"API key length: {len(self.api_key) if self.api_key else 0}")
-                logger.info(f"API key prefix: {self.api_key[:10] if self.api_key else 'None'}...")
-                logger.info(f"Client type: {type(self.client)}")
-                logger.info(f"Client configured: {self.client is not None}")
+                logger.info(f"openai.api_key set: {hasattr(openai, 'api_key')}")
                 logger.info(f"=== END WHISPER DEBUG INFO ===")
                 
-                # Use OpenAI client for v1.x SDK
-                transcript = self.client.audio.transcriptions.create(
+                # Use official openai.Audio.transcriptions.create method
+                logger.debug(f"Using model: {model}")
+                transcript = openai.Audio.transcriptions.create(
                     model=model,
                     file=temp_file,
                     language=language,  # Will auto-detect if None
@@ -122,8 +120,11 @@ class WhisperService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to download audio from {audio_url}: {e}")
             return None
+        except openai.OpenAIError as e:
+            logger.error(f"OpenAI API error during transcription: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error during Whisper transcription: {e}")
+            logger.error(f"Unexpected error during Whisper transcription: {e}")
             return None
     
     def transcribe_audio_file(self, file_path: str, language: str = None, prompt: str = None, model: str = "whisper-1") -> Optional[str]:
@@ -158,13 +159,12 @@ class WhisperService:
                 logger.info(f"=== WHISPER DEBUG INFO (FILE) ===")
                 logger.info(f"API key configured: {self.api_key is not None}")
                 logger.info(f"API key length: {len(self.api_key) if self.api_key else 0}")
-                logger.info(f"API key prefix: {self.api_key[:10] if self.api_key else 'None'}...")
-                logger.info(f"Client type: {type(self.client)}")
-                logger.info(f"Client configured: {self.client is not None}")
+                logger.info(f"openai.api_key set: {hasattr(openai, 'api_key')}")
                 logger.info(f"=== END WHISPER DEBUG INFO (FILE) ===")
                 
-                # Use OpenAI client for v1.x SDK
-                transcript = self.client.audio.transcriptions.create(
+                # Use official openai.Audio.transcriptions.create method
+                logger.debug(f"Using model: {model}")
+                transcript = openai.Audio.transcriptions.create(
                     model=model,
                     file=audio_file,
                     language=language,  # Will auto-detect if None
@@ -178,8 +178,11 @@ class WhisperService:
             
             return transcription_text
             
+        except openai.OpenAIError as e:
+            logger.error(f"OpenAI API error during transcription: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error during Whisper transcription: {e}")
+            logger.error(f"Unexpected error during Whisper transcription: {e}")
             return None
 
 # Lazy loading implementation
