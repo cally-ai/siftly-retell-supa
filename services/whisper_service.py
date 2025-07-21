@@ -92,8 +92,18 @@ class WhisperService:
                 # Transcribe using OpenAI Whisper
                 logger.info("Sending audio to OpenAI Whisper API")
                 
-                # Debug: Check API key status
-                logger.debug(f"API key configured: {self.api_key is not None}")
+                # Comprehensive debugging
+                logger.info(f"=== WHISPER DEBUG INFO ===")
+                logger.info(f"API key configured: {self.api_key is not None}")
+                logger.info(f"API key length: {len(self.api_key) if self.api_key else 0}")
+                logger.info(f"API key prefix: {self.api_key[:10] if self.api_key else 'None'}...")
+                logger.info(f"openai module type: {type(openai)}")
+                logger.info(f"openai.api_key set: {hasattr(openai, 'api_key')}")
+                logger.info(f"openai.api_key value: {openai.api_key[:10] if openai.api_key else 'None'}...")
+                logger.info(f"openai.audio type: {type(openai.audio)}")
+                logger.info(f"openai.audio.transcriptions type: {type(openai.audio.transcriptions)}")
+                logger.info(f"openai.audio.transcriptions.create type: {type(openai.audio.transcriptions.create)}")
+                logger.info(f"=== END WHISPER DEBUG INFO ===")
                 
                 # Use openai module directly to avoid client instance issues
                 transcript = openai.audio.transcriptions.create(
@@ -145,8 +155,18 @@ class WhisperService:
             logger.info(f"Local audio file size: {file_size} bytes ({file_size / 1024:.1f} KB)")
             
             with open(file_path, 'rb') as audio_file:
-                # Debug: Check API key status
-                logger.debug(f"API key configured: {self.api_key is not None}")
+                # Comprehensive debugging
+                logger.info(f"=== WHISPER DEBUG INFO (FILE) ===")
+                logger.info(f"API key configured: {self.api_key is not None}")
+                logger.info(f"API key length: {len(self.api_key) if self.api_key else 0}")
+                logger.info(f"API key prefix: {self.api_key[:10] if self.api_key else 'None'}...")
+                logger.info(f"openai module type: {type(openai)}")
+                logger.info(f"openai.api_key set: {hasattr(openai, 'api_key')}")
+                logger.info(f"openai.api_key value: {openai.api_key[:10] if openai.api_key else 'None'}...")
+                logger.info(f"openai.audio type: {type(openai.audio)}")
+                logger.info(f"openai.audio.transcriptions type: {type(openai.audio.transcriptions)}")
+                logger.info(f"openai.audio.transcriptions.create type: {type(openai.audio.transcriptions.create)}")
+                logger.info(f"=== END WHISPER DEBUG INFO (FILE) ===")
                 
                 # Use openai module directly to avoid client instance issues
                 transcript = openai.audio.transcriptions.create(
