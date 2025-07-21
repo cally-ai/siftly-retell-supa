@@ -34,7 +34,7 @@ class WhisperService:
             # No need to set self.client since we don't use it anymore
         else:
             try:
-                # Use module-based approach to avoid constructor issues
+                # Use module-level client approach (recommended for v1.0.0+)
                 logger.info("Setting OpenAI API key via module...")
                 openai.api_key = self.api_key
                 openai.organization = "org-lBrZYqj9NS6IejNMvFcZ1kBS"
@@ -104,7 +104,7 @@ class WhisperService:
                 logger.info(f"Client configured: {self.client is not None}")
                 logger.info(f"=== END WHISPER DEBUG INFO ===")
                 
-                # Use OpenAI module for v1.14.0 SDK
+                # Use module-level client with new API syntax
                 logger.debug(f"Using model: {model}")
                 transcript = self.client.audio.transcriptions.create(
                     model=model,
@@ -165,7 +165,7 @@ class WhisperService:
                 logger.info(f"Client configured: {self.client is not None}")
                 logger.info(f"=== END WHISPER DEBUG INFO (FILE) ===")
                 
-                # Use OpenAI module for v1.14.0 SDK
+                # Use module-level client with new API syntax
                 logger.debug(f"Using model: {model}")
                 transcript = self.client.audio.transcriptions.create(
                     model=model,
