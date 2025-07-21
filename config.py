@@ -13,6 +13,7 @@ print("=== ENVIRONMENT VARIABLES DEBUG ===")
 print(f"AIRTABLE_API_KEY: {os.getenv('AIRTABLE_API_KEY', 'NOT SET')}")
 print(f"AIRTABLE_BASE_ID: {os.getenv('AIRTABLE_BASE_ID', 'NOT SET')}")
 print(f"AIRTABLE_TABLE_NAME: {os.getenv('AIRTABLE_TABLE_NAME', 'NOT SET')}")
+print(f"OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY', 'NOT SET')}")
 print("=== END DEBUG ===")
 
 class Config:
@@ -57,6 +58,7 @@ class Config:
         print(f"Config validation - AIRTABLE_API_KEY: {'SET' if cls.AIRTABLE_API_KEY else 'NOT SET'}")
         print(f"Config validation - AIRTABLE_BASE_ID: {'SET' if cls.AIRTABLE_BASE_ID else 'NOT SET'}")
         print(f"Config validation - AIRTABLE_TABLE_NAME: {cls.AIRTABLE_TABLE_NAME}")
+        print(f"Config validation - OPENAI_API_KEY: {'SET' if cls.OPENAI_API_KEY else 'NOT SET'}")
             
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
