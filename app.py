@@ -12,6 +12,7 @@ from routes.airtable_routes import airtable_bp
 
 # Version check for debugging
 try:
+    from openai import OpenAI
     import openai
     print(f"=== OPENAI SDK VERSION: {openai.__version__} ===")
 except ImportError:

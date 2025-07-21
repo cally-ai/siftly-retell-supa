@@ -5,7 +5,7 @@ import requests
 import tempfile
 import os
 from typing import Optional
-import openai
+from openai import OpenAI
 from config import Config
 from utils.logger import get_logger
 
@@ -34,11 +34,13 @@ class WhisperService:
             # No need to set self.client since we don't use it anymore
         else:
             try:
-                # Configure OpenAI client via global api_key
-                logger.info("Configuring OpenAI client via global api_key...")
-                openai.api_key = self.api_key
-                openai.organization = "org-lBrZYqj9NS6IejNMvFcZ1kBS"
-                openai.project = "proj_6pltaNep8SDLiRKaFlCTjBrU"
+                # Initialize OpenAI client with project configuration
+                logger.info("Initializing OpenAI client with project configuration...")
+                self.client = OpenAI(
+                    api_key=self.api_key,
+                    organization="org-lBrZYqj9NS6IejNMvFcZ1kBS",
+                    project="proj_6pltaNep8SDLiRKaFlCTjBrU"
+                )
                 logger.info("Whisper service initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize Whisper service: {e}")
@@ -47,7 +49,7 @@ class WhisperService:
     
     def is_configured(self) -> bool:
         """Check if Whisper service is properly configured"""
-        return self.api_key is not None
+        return self.client is not None
     
     def __repr__(self):
         """String representation for debugging"""
@@ -99,16 +101,12 @@ class WhisperService:
                 logger.info(f"API key configured: {self.api_key is not None}")
                 logger.info(f"API key length: {len(self.api_key) if self.api_key else 0}")
                 logger.info(f"API key prefix: {self.api_key[:10] if self.api_key else 'None'}...")
-                logger.info(f"openai module type: {type(openai)}")
-                logger.info(f"openai.api_key set: {hasattr(openai, 'api_key')}")
-                logger.info(f"openai.api_key value: {openai.api_key[:10] if openai.api_key else 'None'}...")
-                logger.info(f"openai.audio type: {type(openai.audio)}")
-                logger.info(f"openai.audio.transcriptions type: {type(openai.audio.transcriptions)}")
-                logger.info(f"openai.audio.transcriptions.create type: {type(openai.audio.transcriptions.create)}")
+                logger.info(f"Client type: {type(self.client)}")
+                logger.info(f"Client configured: {self.client is not None}")
                 logger.info(f"=== END WHISPER DEBUG INFO ===")
                 
-                # Use openai module directly to avoid client instance issues
-                transcript = openai.audio.transcriptions.create(
+                # Use OpenAI client for v1.x SDK
+                transcript = self.client.audio.transcriptions.create(
                     model=model,
                     file=temp_file,
                     language=language,  # Will auto-detect if None
@@ -162,16 +160,12 @@ class WhisperService:
                 logger.info(f"API key configured: {self.api_key is not None}")
                 logger.info(f"API key length: {len(self.api_key) if self.api_key else 0}")
                 logger.info(f"API key prefix: {self.api_key[:10] if self.api_key else 'None'}...")
-                logger.info(f"openai module type: {type(openai)}")
-                logger.info(f"openai.api_key set: {hasattr(openai, 'api_key')}")
-                logger.info(f"openai.api_key value: {openai.api_key[:10] if openai.api_key else 'None'}...")
-                logger.info(f"openai.audio type: {type(openai.audio)}")
-                logger.info(f"openai.audio.transcriptions type: {type(openai.audio.transcriptions)}")
-                logger.info(f"openai.audio.transcriptions.create type: {type(openai.audio.transcriptions.create)}")
+                logger.info(f"Client type: {type(self.client)}")
+                logger.info(f"Client configured: {self.client is not None}")
                 logger.info(f"=== END WHISPER DEBUG INFO (FILE) ===")
                 
-                # Use openai module directly to avoid client instance issues
-                transcript = openai.audio.transcriptions.create(
+                # Use OpenAI client for v1.x SDK
+                transcript = self.client.audio.transcriptions.create(
                     model=model,
                     file=audio_file,
                     language=language,  # Will auto-detect if None
