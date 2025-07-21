@@ -266,37 +266,91 @@ class AirtableService:
             return False
         
         try:
-            logger.info(f"Processing recording from: {recording_url}")
+            logger.info(f"Downloading recording from: {recording_url}")
+            
+            # Download the file
+            response = requests.get(recording_url, stream=True, timeout=30)
+            response.raise_for_status()
+            
+            # Get file size for logging
+            file_size = len(response.content)
+            logger.info(f"Downloaded recording file, size: {file_size} bytes")
             
             # Format the filename with call_id and created_time
-            # Remove any special characters from created_time for filename safety
             safe_created_time = created_time.replace(':', '-').replace('.', '-').replace('T', '_')
             filename = f"call_{call_id}_{safe_created_time}.wav"
             
             logger.info(f"Generated filename: {filename}")
             
-            # For Airtable attachments, we need to use the correct format
-            # Airtable attachment format: [{"url": "url", "filename": "name"}]
-            attachment_data = {
-                'url': recording_url,
-                'filename': filename
-            }
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
+                temp_file.write(response.content)
+                temp_file_path = temp_file.name
             
-            # Update the record with the attachment
-            update_data = {
-                'recording_file': [attachment_data]
-            }
-            
-            logger.info(f"Adding recording attachment to Airtable record: {record_id}")
-            updated_record = self.update_record(record_id, update_data)
-            
-            if updated_record:
-                logger.info(f"Successfully added recording to Airtable record: {record_id}")
-                return True
-            else:
-                logger.error(f"Failed to update record with recording file: {record_id}")
-                return False
+            try:
+                # Upload to Airtable as attachment
+                logger.info(f"Uploading recording to Airtable record: {record_id}")
+                
+                # For Airtable attachments, we need to use their file upload API
+                # First, upload the file to Airtable's servers
+                logger.info(f"Uploading file to Airtable servers: {filename}")
+                
+                # Use Airtable's file upload endpoint
+                upload_url = f"https://api.airtable.com/v0/meta/bases/{self.base_id}/files"
+                headers = {
+                    'Authorization': f'Bearer {self.api_key}',
+                    'Content-Type': 'application/octet-stream'
+                }
+                
+                with open(temp_file_path, 'rb') as file:
+                    upload_response = requests.post(
+                        upload_url,
+                        data=file,
+                        headers=headers,
+                        params={'filename': filename}
+                    )
+                
+                if upload_response.status_code == 200:
+                    upload_data = upload_response.json()
+                    file_id = upload_data.get('id')
+                    
+                    if file_id:
+                        logger.info(f"File uploaded to Airtable, ID: {file_id}")
+                        
+                        # Now attach the uploaded file to the record
+                        attachment_data = {
+                            'id': file_id,
+                            'filename': filename
+                        }
+                        
+                        update_data = {
+                            'recording_file': [attachment_data]
+                        }
+                        
+                        updated_record = self.update_record(record_id, update_data)
+                        
+                        if updated_record:
+                            logger.info(f"Successfully attached uploaded file to record: {record_id}")
+                            return True
+                        else:
+                            logger.error(f"Failed to attach uploaded file to record: {record_id}")
+                            return False
+                    else:
+                        logger.error("No file ID returned from Airtable upload")
+                        return False
+                else:
+                    logger.error(f"Failed to upload file to Airtable: {upload_response.status_code} - {upload_response.text}")
+                    return False
+                        
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+                    logger.info("Cleaned up temporary recording file")
         
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to download recording from {recording_url}: {e}")
+            return False
         except Exception as e:
             logger.error(f"Error processing recording file: {e}")
             return False
