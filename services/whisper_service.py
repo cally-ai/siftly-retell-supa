@@ -155,5 +155,14 @@ class WhisperService:
             logger.error(f"Error during Whisper transcription: {e}")
             return None
 
-# Global instance
-whisper_service = WhisperService() 
+# Lazy loading implementation
+_whisper_service = None
+
+def get_whisper_service():
+    """Get or create the WhisperService instance (lazy loading)"""
+    global _whisper_service
+    if _whisper_service is None:
+        print("=== Initializing WhisperService ===")
+        _whisper_service = WhisperService()
+        print(f"=== WhisperService initialized: {'OK' if _whisper_service.is_configured() else 'FAILED'} ===")
+    return _whisper_service 

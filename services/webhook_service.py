@@ -9,7 +9,7 @@ from config import Config
 from utils.logger import get_logger
 from utils.validators import validate_retell_webhook, validate_retell_inbound_webhook, sanitize_webhook_data
 from services.airtable_service import airtable_service
-from services.whisper_service import whisper_service
+from services.whisper_service import get_whisper_service
 
 logger = get_logger(__name__)
 
@@ -621,6 +621,7 @@ class WebhookService:
                         
                         # Transcribe audio with Whisper after recording is saved
                         logger.info(f"Starting Whisper transcription for record: {record_id}")
+                        whisper_service = get_whisper_service()
                         whisper_transcription = whisper_service.transcribe_audio_url(recording_url)
                         
                         if whisper_transcription:
