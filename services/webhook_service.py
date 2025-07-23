@@ -347,21 +347,21 @@ class WebhookService:
         Returns:
             Customer data dictionary or None if not found
         """
+        # Check Redis cache first if configured
+        if is_redis_configured():
+            try:
+                cached_data = asyncio.run(redis_client.get(to_number))
+                if cached_data:
+                    logger.info(f"Redis cache hit for {to_number}")
+                    return json.loads(cached_data)
+                else:
+                    logger.info(f"Redis cache miss for {to_number}")
+            except Exception as e:
+                logger.warning(f"Redis cache error for {to_number}: {e}")
+        
+        # Fallback to Airtable lookup
+        logger.info(f"Performing Airtable lookup for {to_number}")
         try:
-            # Check Redis cache first if configured
-            if is_redis_configured():
-                try:
-                    cached_data = asyncio.run(redis_client.get(to_number))
-                    if cached_data:
-                        logger.info(f"Redis cache hit for {to_number}")
-                        return json.loads(cached_data)
-                    else:
-                        logger.info(f"Redis cache miss for {to_number}")
-                except Exception as e:
-                    logger.warning(f"Redis cache error for {to_number}: {e}")
-            
-            # Fallback to Airtable lookup
-            logger.info(f"Performing Airtable lookup for {to_number}")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             data = loop.run_until_complete(self._get_customer_data_async(to_number))
@@ -376,7 +376,8 @@ class WebhookService:
             
             return data
         finally:
-            loop.close()
+            if 'loop' in locals():
+                loop.close()
     
     def _extract_webhook_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
