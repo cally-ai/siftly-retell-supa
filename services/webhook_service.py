@@ -24,9 +24,7 @@ class WebhookService:
             'urgent', 'important', 'issue', 'problem', 'help', 'emergency',
             'broken', 'error', 'failed', 'support', 'assistance', 'critical'
         ]
-        # Cache for customer data to reduce Airtable lookups
-        self.client_cache = {}
-        self.agent_mapping_cache = {}
+
     
     def process_retell_webhook(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -229,12 +227,7 @@ class WebhookService:
         Returns:
             Customer data dictionary or None if not found
         """
-        # Check cache first
-        if to_number in self.client_cache:
-            logger.info(f"Cache hit for to_number: {to_number}")
-            return self.client_cache[to_number]
 
-        logger.info(f"Cache miss for to_number: {to_number}, querying Airtable...")
         logger.info(f"=== AIRTABLE LOOKUP START (async) ===")
         
         try:
@@ -331,10 +324,9 @@ class WebhookService:
                             key = parts[0].strip()
                             value = parts[1].strip()
                             dynamic_variables[key] = value
-                            self.agent_mapping_cache[lang_rec['id']] = (key, value)
+
             
-            # Cache the result
-            self.client_cache[to_number] = dynamic_variables
+
             logger.info(f"Returning dynamic variables: {dynamic_variables}")
             logger.info(f"=== AIRTABLE LOOKUP END (async) ===")
             
