@@ -2,6 +2,8 @@
 Webhook service for processing Retell AI webhooks
 """
 import json
+import asyncio
+import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pyairtable import Table
@@ -22,6 +24,9 @@ class WebhookService:
             'urgent', 'important', 'issue', 'problem', 'help', 'emergency',
             'broken', 'error', 'failed', 'support', 'assistance', 'critical'
         ]
+        # Cache for customer data to reduce Airtable lookups
+        self.client_cache = {}
+        self.agent_mapping_cache = {}
     
     def process_retell_webhook(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -96,6 +101,7 @@ class WebhookService:
         Returns:
             Response data with dynamic variables and configuration
         """
+        start_time = time.time()
         event_type = data.get('event', 'unknown')
         logger.info(f"=== INBOUND CALL WEBHOOK RECEIVED ===")
         logger.info(f"Event Type: {event_type}")
@@ -105,7 +111,11 @@ class WebhookService:
         logger.info(f"=== END INBOUND CALL WEBHOOK ===")
         
         # Validate inbound webhook data
+        validation_start = time.time()
         is_valid, errors = validate_retell_inbound_webhook(data)
+        validation_duration = time.time() - validation_start
+        logger.info(f"Validation duration: {validation_duration:.3f}s")
+        
         if not is_valid:
             logger.error(f"Invalid inbound webhook data: {errors}")
             raise ValueError(f"Invalid inbound webhook data: {errors}")
@@ -119,12 +129,21 @@ class WebhookService:
         logger.info(f"Inbound call from {from_number} to {to_number}")
         
         # Get dynamic variables and configuration based on caller
+        config_start = time.time()
         response_data = self._get_inbound_configuration(from_number, to_number, agent_id)
+        config_duration = time.time() - config_start
+        logger.info(f"Configuration lookup duration: {config_duration:.3f}s")
         
         # Log the response for debugging
+        response_start = time.time()
         logger.info(f"=== INBOUND RESPONSE TO RETELL ===")
         logger.info(f"Response: {response_data}")
         logger.info(f"=== END INBOUND RESPONSE ===")
+        response_duration = time.time() - response_start
+        logger.info(f"Response logging duration: {response_duration:.3f}s")
+        
+        total_duration = time.time() - start_time
+        logger.info(f"Total inbound webhook processing time: {total_duration:.3f}s")
         
         return response_data
     
@@ -152,7 +171,10 @@ class WebhookService:
         logger.info(f"=== LOOKING UP CUSTOMER DATA ===")
         logger.info(f"Looking up to_number: {to_number}")
         
+        lookup_start = time.time()
         customer_data = self._get_customer_data(to_number)
+        lookup_duration = time.time() - lookup_start
+        logger.info(f"Airtable lookup duration: {lookup_duration:.3f}s")
         
         logger.info(f"Customer data found: {customer_data is not None}")
         if customer_data:
@@ -197,9 +219,9 @@ class WebhookService:
         
         return response
     
-    def _get_customer_data(self, to_number: str) -> Optional[Dict[str, Any]]:
+    async def _get_customer_data_async(self, to_number: str) -> Optional[Dict[str, Any]]:
         """
-        Get customer data from Airtable based on to_number
+        Get customer data from Airtable based on to_number (async version)
         
         Args:
             to_number: The phone number to look up
@@ -207,14 +229,21 @@ class WebhookService:
         Returns:
             Customer data dictionary or None if not found
         """
+        # Check cache first
+        if to_number in self.client_cache:
+            logger.info(f"Cache hit for to_number: {to_number}")
+            return self.client_cache[to_number]
+
+        logger.info(f"Cache miss for to_number: {to_number}, querying Airtable...")
+        logger.info(f"=== AIRTABLE LOOKUP START (async) ===")
+        
         try:
-            logger.info(f"=== AIRTABLE LOOKUP START ===")
-            logger.info(f"Looking up to_number: {to_number}")
-            
             # Step 1: Find the to_number in TABLE_ID_TWILIO_NUMBER
             twilio_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tbl0PeZoX2qgl74ZT')
             logger.info(f"Searching Twilio table for number: {to_number}")
-            twilio_records = twilio_table.all(formula=f"{{twilio_number}} = '{to_number}'")
+            twilio_records = await asyncio.to_thread(
+                twilio_table.all, formula=f"{{twilio_number}} = '{to_number}'"
+            )
             
             logger.info(f"Found {len(twilio_records)} Twilio records")
             
@@ -230,9 +259,12 @@ class WebhookService:
                 logger.warning(f"No client linked to Twilio number: {to_number}")
                 return None
             
-            # Step 2: Get client data from TABLE_ID_CLIENT
+            # Step 2-4: Run client + dynamic vars + language lookups in parallel
             client_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblkyQzhGKVv6H03U')
-            client_record = client_table.get(client_record_id)
+            dynamic_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblGIPAQZ2rgn6naD')
+            
+            # Get client record first to extract metadata
+            client_record = await asyncio.to_thread(client_table.get, client_record_id)
             
             if not client_record:
                 logger.warning(f"Client record not found: {client_record_id}")
@@ -240,51 +272,95 @@ class WebhookService:
             
             client_fields = client_record['fields']
             
-            # Step 3: Get dynamic variables from TABLE_ID_CLIENT_DYNAMIC_VARIABLES
-            dynamic_variables = {}
+            # Extract IDs for parallel lookups
             dynamic_variables_record_id = client_fields.get('dynamic_variables', [None])[0] if client_fields.get('dynamic_variables') else None
-            
-            if dynamic_variables_record_id:
-                dynamic_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblGIPAQZ2rgn6naD')
-                dynamic_record = dynamic_table.get(dynamic_variables_record_id)
-                
-                if dynamic_record:
-                    dynamic_fields = dynamic_record['fields']
-                    
-                    # Add all fields except excluded ones
-                    excluded_fields = ['name', 'client_dynamic_variables_id', 'client']
-                    for field_name, field_value in dynamic_fields.items():
-                        if field_name not in excluded_fields:
-                            dynamic_variables[field_name] = field_value
-            
-            # Step 4: Get language agent names from linked records
             language_agent_names = client_fields.get('language_agent_names', [])
             
-            for linked_record_id in language_agent_names:
-                try:
-                    language_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblT79Xju3vLxNipr')
-                    language_record = language_table.get(linked_record_id)
-                    
-                    if language_record:
-                        key_pair_value = language_record['fields'].get('key_pair', '')
-                        if key_pair_value and '=' in key_pair_value:
-                            # Parse key_pair like "nl-be_agent_name = Tom"
-                            parts = key_pair_value.split('=', 1)
-                            if len(parts) == 2:
-                                key = parts[0].strip()
-                                value = parts[1].strip()
-                                dynamic_variables[key] = value
-                                
-                except Exception as e:
-                    logger.warning(f"Error processing language agent name record {linked_record_id}: {e}")
+            if not dynamic_variables_record_id:
+                logger.warning(f"No dynamic variables ID found for client: {client_record_id}")
+                return None
             
+            # Prepare parallel tasks
+            tasks = []
+            
+            # Task 1: Get dynamic variables
+            dynamic_record_task = asyncio.to_thread(dynamic_table.get, dynamic_variables_record_id)
+            tasks.append(dynamic_record_task)
+            
+            # Task 2+: Get language agent names
+            language_tasks = []
+            if language_agent_names:
+                language_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblT79Xju3vLxNipr')
+                for linked_record_id in language_agent_names:
+                    language_tasks.append(asyncio.to_thread(language_table.get, linked_record_id))
+                tasks.extend(language_tasks)
+            
+            # Execute all lookups in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results
+            dynamic_record = results[0]
+            language_records = results[1:] if len(results) > 1 else []
+            
+            # Check for exceptions
+            if isinstance(dynamic_record, Exception):
+                logger.error(f"Error getting dynamic record: {dynamic_record}")
+                return None
+            
+            # Build dynamic variables dictionary
+            dynamic_variables = {}
+            
+            # Add dynamic variables
+            if dynamic_record:
+                dynamic_fields = dynamic_record['fields']
+                excluded_fields = ['name', 'client_dynamic_variables_id', 'client']
+                for field_name, field_value in dynamic_fields.items():
+                    if field_name not in excluded_fields:
+                        dynamic_variables[field_name] = field_value
+            
+            # Add language agent mappings
+            for i, lang_rec in enumerate(language_records):
+                if isinstance(lang_rec, Exception):
+                    logger.warning(f"Error getting language record {language_agent_names[i]}: {lang_rec}")
+                    continue
+                if lang_rec:
+                    key_pair_value = lang_rec['fields'].get('key_pair', '')
+                    if key_pair_value and '=' in key_pair_value:
+                        parts = key_pair_value.split('=', 1)
+                        if len(parts) == 2:
+                            key = parts[0].strip()
+                            value = parts[1].strip()
+                            dynamic_variables[key] = value
+                            self.agent_mapping_cache[lang_rec['id']] = (key, value)
+            
+            # Cache the result
+            self.client_cache[to_number] = dynamic_variables
             logger.info(f"Returning dynamic variables: {dynamic_variables}")
-            logger.info(f"=== AIRTABLE LOOKUP END ===")
+            logger.info(f"=== AIRTABLE LOOKUP END (async) ===")
+            
             return dynamic_variables
             
         except Exception as e:
             logger.error(f"Error getting customer data for {to_number}: {e}")
             return None
+
+    def _get_customer_data(self, to_number: str) -> Optional[Dict[str, Any]]:
+        """
+        Get customer data from Airtable based on to_number (sync wrapper)
+        
+        Args:
+            to_number: The phone number to look up
+        
+        Returns:
+            Customer data dictionary or None if not found
+        """
+        # For backward compatibility, run the async version in a new event loop
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(self._get_customer_data_async(to_number))
+        finally:
+            loop.close()
     
     def _extract_webhook_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
