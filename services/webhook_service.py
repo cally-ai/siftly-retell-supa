@@ -535,10 +535,10 @@ class WebhookService:
         Returns:
             True if successful, False otherwise
         """
-        # Only save call details when event is "call_analyzed"
+        # Only save call details when event is "call_ended"
         event_type = webhook_data.get('event_type', 'unknown')
-        if event_type != 'call_analyzed':
-            logger.info(f"Skipping Airtable save for event type: {event_type} (only saving 'call_analyzed' events)")
+        if event_type != 'call_ended':
+            logger.info(f"Skipping Airtable save for event type: {event_type} (only saving 'call_ended' events)")
             return True  # Return True since this is expected behavior
         
         if not airtable_service.is_configured():
@@ -688,18 +688,59 @@ class WebhookService:
         # For example: log call initiation, update status, etc.
     
     def _handle_call_analyzed(self, webhook_data: Dict[str, Any]) -> None:
-        """Handle call analyzed event"""
-        logger.info(f"Call analyzed: {webhook_data['call_id']}")
+        """Handle call analyzed event - update existing record with call_analysis data"""
+        call_id = webhook_data['call_id']
+        logger.info(f"Call analyzed: {call_id}")
         
-        # Add your custom logic for call analyzed events
-        # For example: trigger follow-up actions, update analytics, etc.
-        
-        # This event contains the full call analysis data
-        # You can access call_analysis object from the raw data
+        # Get call_analysis from the raw data
         call_analysis = webhook_data['raw_data'].get('call', {}).get('call_analysis', {})
-        if call_analysis:
-            logger.info(f"Call analysis available for {webhook_data['call_id']}")
-            # Process call analysis data here
+        if not call_analysis:
+            logger.warning(f"No call_analysis data found for call {call_id}")
+            return
+        
+        logger.info(f"Call analysis available for {call_id}, looking up existing record...")
+        
+        # Look up the existing record in Airtable using call_id
+        if not airtable_service.is_configured():
+            logger.error("Airtable service not configured, cannot update call_analysis")
+            return
+        
+        try:
+            # Search for the record with matching call_id
+            matching_records = airtable_service.search_records('call_id', call_id)
+            
+            if not matching_records:
+                logger.warning(f"No existing record found for call_id: {call_id}")
+                return
+            
+            if len(matching_records) > 1:
+                logger.warning(f"Multiple records found for call_id: {call_id}, using first one")
+            
+            # Get the first matching record
+            existing_record = matching_records[0]
+            record_id = existing_record.get('id')
+            
+            if not record_id:
+                logger.error(f"No record ID found in existing record for call_id: {call_id}")
+                return
+            
+            logger.info(f"Found existing record {record_id} for call_id: {call_id}")
+            
+            # Prepare the update data with call_analysis
+            update_data = {
+                'call_analysis': json.dumps(call_analysis)
+            }
+            
+            # Update the record
+            updated_record = airtable_service.update_record(record_id, update_data)
+            
+            if updated_record:
+                logger.info(f"Successfully updated record {record_id} with call_analysis for call_id: {call_id}")
+            else:
+                logger.error(f"Failed to update record {record_id} with call_analysis for call_id: {call_id}")
+                
+        except Exception as e:
+            logger.error(f"Error updating call_analysis for call_id {call_id}: {e}")
     
     def get_webhook_statistics(self, hours: int = 24) -> Dict[str, Any]:
         """
