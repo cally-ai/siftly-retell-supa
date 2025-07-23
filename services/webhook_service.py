@@ -12,6 +12,7 @@ from utils.logger import get_logger
 from utils.validators import validate_retell_webhook, validate_retell_inbound_webhook, sanitize_webhook_data
 from services.airtable_service import airtable_service
 from services.whisper_service import get_whisper_service
+from services.redis_client import redis_client, is_redis_configured
 
 logger = get_logger(__name__)
 
@@ -338,7 +339,7 @@ class WebhookService:
 
     def _get_customer_data(self, to_number: str) -> Optional[Dict[str, Any]]:
         """
-        Get customer data from Airtable based on to_number (sync wrapper)
+        Get customer data from Airtable based on to_number (sync wrapper with Redis cache)
         
         Args:
             to_number: The phone number to look up
@@ -346,11 +347,34 @@ class WebhookService:
         Returns:
             Customer data dictionary or None if not found
         """
-        # For backward compatibility, run the async version in a new event loop
         try:
+            # Check Redis cache first if configured
+            if is_redis_configured():
+                try:
+                    cached_data = asyncio.run(redis_client.get(to_number))
+                    if cached_data:
+                        logger.info(f"Redis cache hit for {to_number}")
+                        return json.loads(cached_data)
+                    else:
+                        logger.info(f"Redis cache miss for {to_number}")
+                except Exception as e:
+                    logger.warning(f"Redis cache error for {to_number}: {e}")
+            
+            # Fallback to Airtable lookup
+            logger.info(f"Performing Airtable lookup for {to_number}")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            return loop.run_until_complete(self._get_customer_data_async(to_number))
+            data = loop.run_until_complete(self._get_customer_data_async(to_number))
+            
+            # Cache result in Redis if found and Redis is configured
+            if data and is_redis_configured():
+                try:
+                    asyncio.run(redis_client.set(to_number, json.dumps(data), ex=10800))  # 3 hours TTL
+                    logger.info(f"Cached data for {to_number} in Redis")
+                except Exception as e:
+                    logger.warning(f"Failed to cache data for {to_number}: {e}")
+            
+            return data
         finally:
             loop.close()
     
