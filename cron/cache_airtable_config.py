@@ -13,20 +13,50 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.webhook_service import webhook_service
 from services.redis_client import redis_client, is_redis_configured
+from services.airtable_service import airtable_service
 from utils.logger import get_logger
+from pyairtable import Table
+from config import Config
 
 logger = get_logger(__name__)
 
-# List of to_numbers to preload (you can automate this too)
-to_numbers = [
-    "+32460234291",  # Rasolar
-    # Add more numbers as needed
-]
+async def discover_phone_numbers():
+    """Automatically discover all phone numbers from Airtable"""
+    try:
+        # Query the Twilio number mapping table
+        twilio_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tbl0PeZoX2qgl74ZT')
+        records = await asyncio.to_thread(twilio_table.all)
+        
+        phone_numbers = []
+        for record in records:
+            twilio_number = record['fields'].get('twilio_number', '')
+            if twilio_number:
+                phone_numbers.append(twilio_number)
+                logger.info(f"Discovered phone number: {twilio_number}")
+        
+        logger.info(f"Auto-discovered {len(phone_numbers)} phone numbers from Airtable")
+        return phone_numbers
+        
+    except Exception as e:
+        logger.error(f"Error discovering phone numbers: {e}")
+        # Fallback to hardcoded list
+        fallback_numbers = [
+            "+32460234291",  # Rasolar
+        ]
+        logger.info(f"Using fallback list: {fallback_numbers}")
+        return fallback_numbers
 
 async def preload_cache():
     """Preload Airtable configurations into Redis cache"""
     if not is_redis_configured():
         logger.error("Redis not configured - cannot preload cache")
+        return
+    
+    # Auto-discover phone numbers
+    to_numbers = await discover_phone_numbers()
+    
+    if not to_numbers:
+        logger.warning("No phone numbers found to cache")
         return
     
     logger.info(f"Starting cache preload for {len(to_numbers)} numbers")
