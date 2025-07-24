@@ -316,7 +316,11 @@ class WebhookService:
         # Check Redis cache first if configured
         if is_redis_configured():
             try:
-                cached_data = asyncio.run(redis_client.get(to_number))
+                # Use ThreadPoolExecutor to run async Redis operations in sync context
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    cached_data = executor.submit(lambda: asyncio.run(redis_client.get(to_number))).result()
+                
                 if cached_data:
                     logger.info(f"Redis cache hit for {to_number}")
                     return json.loads(cached_data)
@@ -328,22 +332,25 @@ class WebhookService:
         # Fallback to Airtable lookup
         logger.info(f"Performing Airtable lookup for {to_number}")
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            data = loop.run_until_complete(self._get_customer_data_async(to_number))
+            # Use ThreadPoolExecutor to run async operations in sync context
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                data = executor.submit(lambda: asyncio.run(self._get_customer_data_async(to_number))).result()
             
             # Cache result in Redis if found and Redis is configured
             if data and is_redis_configured():
                 try:
-                    asyncio.run(redis_client.set(to_number, json.dumps(data), ex=10800))  # 3 hours TTL
+                    # Use ThreadPoolExecutor to run async Redis operations in sync context
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        executor.submit(lambda: asyncio.run(redis_client.set(to_number, json.dumps(data), ex=10800))).result()
                     logger.info(f"Cached data for {to_number} in Redis")
                 except Exception as e:
                     logger.warning(f"Failed to cache data for {to_number}: {e}")
             
             return data
-        finally:
-            if 'loop' in locals():
-                loop.close()
+        except Exception as e:
+            logger.error(f"Error in _get_customer_data: {e}")
+            return None
     
     def _extract_webhook_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
