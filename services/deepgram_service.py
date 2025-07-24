@@ -27,7 +27,7 @@ class DeepgramService:
         """
         self.api_key = api_key or Config.DEEPGRAM_API_KEY
         
-        logger.info(f"Deepgram service initialization - API Key: {'SET' if self.api_key else 'NOT SET'}")
+        # Removed verbose initialization logging to reduce bloat
         
         if not self.api_key:
             logger.warning("Deepgram API key not provided. Deepgram service will be disabled.")
@@ -35,12 +35,8 @@ class DeepgramService:
         else:
             try:
                 # Initialize Deepgram client
-                logger.info("Initializing Deepgram client...")
                 self.client = DeepgramClient(self.api_key)
-                
-                # Test the configuration
-                logger.info("Testing Deepgram configuration...")
-                logger.info("Deepgram service initialized successfully")
+                # Removed verbose initialization logging to reduce bloat
             except Exception as e:
                 logger.error(f"Failed to initialize Deepgram service: {e}")
                 logger.error(f"Error details: {type(e).__name__}: {str(e)}")
@@ -89,17 +85,7 @@ class DeepgramService:
                 keywords=keywords or []
             )
             
-            logger.info(f"Deepgram options: model={model}, language={language}, keywords={keywords}")
-            
-            # Transcribe using Deepgram
-            logger.info("Sending audio URL to Deepgram API")
-            
-            # Comprehensive debugging
-            logger.info(f"=== DEEPGRAM DEBUG INFO ===")
-            logger.info(f"API key configured: {self.api_key is not None}")
-            logger.info(f"API key length: {len(self.api_key) if self.api_key else 0}")
-            logger.info(f"Client configured: {self.client is not None}")
-            logger.info(f"=== END DEEPGRAM DEBUG INFO ===")
+            # Removed verbose Deepgram logging to reduce bloat
             
             # Transcribe from URL
             payload = {"url": audio_url}
@@ -110,8 +96,7 @@ class DeepgramService:
             
             if transcription_text:
                 transcription_text = transcription_text.strip()
-                logger.info(f"Deepgram transcription completed. Length: {len(transcription_text)} characters")
-                logger.info(f"Transcription preview: {transcription_text[:100]}...")
+                # Removed verbose transcription logging to reduce bloat
                 return transcription_text
             else:
                 logger.error("Failed to extract transcript from Deepgram response")
@@ -182,8 +167,7 @@ class DeepgramService:
             
             if transcription_text:
                 transcription_text = transcription_text.strip()
-                logger.info(f"Deepgram transcription completed. Length: {len(transcription_text)} characters")
-                logger.info(f"Transcription preview: {transcription_text[:100]}...")
+                # Removed verbose transcription logging to reduce bloat
                 return transcription_text
             else:
                 logger.error("Failed to extract transcript from Deepgram response")

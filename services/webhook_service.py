@@ -41,48 +41,21 @@ class WebhookService:
         call_id = data.get('call', {}).get('call_id', 'unknown')
         event_type = data.get('event', 'unknown')
         
-        # Skip detailed logging for call_started and call_analyzed events to reduce log bloat
-        if event_type not in ['call_started', 'call_analyzed']:
-            # === COMPREHENSIVE PAYLOAD LOGGING ===
-            logger.info(f"=== FULL WEBHOOK PAYLOAD RECEIVED ===")
-            logger.info(f"Raw payload: {data}")
-            logger.info(f"=== END FULL PAYLOAD ===")
-            
-            logger.info(f"=== WEBHOOK DEDUPLICATION INFO ===")
-            logger.info(f"Call ID: {call_id}")
-            logger.info(f"Event Type: {event_type}")
-            logger.info(f"Timestamp: {datetime.now().isoformat()}")
-            logger.info(f"=== END DEDUPLICATION INFO ===")
-        elif event_type == 'call_started':
-            # Minimal logging for call_started events
-            logger.info(f"Call started webhook received - Call ID: {call_id}")
+        # Minimal logging for all events
+        if event_type == 'call_started':
+            logger.info(f"Call started: {call_id}")
         elif event_type == 'call_analyzed':
-            # Minimal logging for call_analyzed events
-            logger.info(f"Call analyzed webhook received - Call ID: {call_id}")
+            logger.info(f"Call analyzed: {call_id}")
+        elif event_type == 'call_ended':
+            # Keep some details for call_ended but minimal
+            from_num = data.get('call', {}).get('from_number', 'unknown')
+            to_num = data.get('call', {}).get('to_number', 'unknown')
+            duration_ms = data.get('call', {}).get('duration_ms', 0)
+            duration_s = duration_ms // 1000 if duration_ms else 0
+            logger.info(f"Call ended: {call_id} ({from_num} → {to_num}, {duration_s}s)")
         
         event_type = data.get('event', 'unknown')
-        logger.info(f"=== CALL EVENT WEBHOOK RECEIVED ===")
-        logger.info(f"Event Type: {event_type}")
-        logger.info(f"Call ID: {data.get('call', {}).get('call_id', 'unknown')}")
-        logger.info(f"From Number: {data.get('call', {}).get('from_number', 'unknown')}")
-        logger.info(f"To Number: {data.get('call', {}).get('to_number', 'unknown')}")
-        logger.info(f"Direction: {data.get('call', {}).get('direction', 'unknown')}")
-        logger.info(f"Call Status: {data.get('call', {}).get('call_status', 'unknown')}")
-        
-        # Log transcript-related fields specifically
-        call_data = data.get('call', {})
-        logger.info(f"Transcript present: {'transcript' in call_data}")
-        logger.info(f"Transcript object present: {'transcript_object' in call_data}")
-        logger.info(f"Transcript with tool calls present: {'transcript_with_tool_calls' in call_data}")
-        
-        if 'transcript' in call_data:
-            logger.info(f"Transcript length: {len(call_data['transcript']) if call_data['transcript'] else 0}")
-        if 'transcript_object' in call_data:
-            logger.info(f"Transcript object length: {len(call_data['transcript_object']) if call_data['transcript_object'] else 0}")
-        if 'transcript_with_tool_calls' in call_data:
-            logger.info(f"Transcript with tool calls length: {len(call_data['transcript_with_tool_calls']) if call_data['transcript_with_tool_calls'] else 0}")
-        
-        logger.info(f"=== END CALL EVENT WEBHOOK ===")
+        # Removed verbose call event logging to reduce bloat
         
         # Validate webhook data
         is_valid, errors = validate_retell_webhook(data)
@@ -100,7 +73,6 @@ class WebhookService:
         processed_data = self._add_insights(webhook_data)
         
         # Save to Airtable (only for call_analyzed events)
-        logger.info(f"Processing event type: {processed_data.get('event_type', 'unknown')}")
         self._save_to_airtable(processed_data)
         
         # Perform additional processing based on event type
@@ -120,18 +92,13 @@ class WebhookService:
         """
         start_time = time.time()
         event_type = data.get('event', 'unknown')
-        logger.info(f"=== INBOUND CALL WEBHOOK RECEIVED ===")
-        logger.info(f"Event Type: {event_type}")
-        logger.info(f"Agent ID: {data.get('call_inbound', {}).get('agent_id', 'unknown')}")
-        logger.info(f"From Number: {data.get('call_inbound', {}).get('from_number', 'unknown')}")
-        logger.info(f"To Number: {data.get('call_inbound', {}).get('to_number', 'unknown')}")
-        logger.info(f"=== END INBOUND CALL WEBHOOK ===")
+        # Removed verbose inbound webhook logging to reduce bloat
         
         # Validate inbound webhook data
         validation_start = time.time()
         is_valid, errors = validate_retell_inbound_webhook(data)
         validation_duration = time.time() - validation_start
-        logger.info(f"Validation duration: {validation_duration:.3f}s")
+        # Removed validation duration logging to reduce bloat
         
         if not is_valid:
             logger.error(f"Invalid inbound webhook data: {errors}")
@@ -143,24 +110,15 @@ class WebhookService:
         to_number = inbound_data.get('to_number', '')
         agent_id = inbound_data.get('agent_id', '')
         
-        logger.info(f"Inbound call from {from_number} to {to_number}")
+        # Get client name for better logging
+        customer_data = self._get_customer_data(to_number)
+        client_name = customer_data.get('client_name', 'Unknown') if customer_data else 'Unknown'
+        logger.info(f"Inbound call: {from_number} → {to_number} ({client_name})")
         
         # Get dynamic variables and configuration based on caller
         config_start = time.time()
         response_data = self._get_inbound_configuration(from_number, to_number, agent_id)
-        config_duration = time.time() - config_start
-        logger.info(f"Configuration lookup duration: {config_duration:.3f}s")
-        
-        # Log the response for debugging
-        response_start = time.time()
-        logger.info(f"=== INBOUND RESPONSE TO RETELL ===")
-        logger.info(f"Response: {response_data}")
-        logger.info(f"=== END INBOUND RESPONSE ===")
-        response_duration = time.time() - response_start
-        logger.info(f"Response logging duration: {response_duration:.3f}s")
-        
-        total_duration = time.time() - start_time
-        logger.info(f"Total inbound webhook processing time: {total_duration:.3f}s")
+        # Removed verbose timing and response logging to reduce bloat
         
         return response_data
     
@@ -185,27 +143,20 @@ class WebhookService:
         # You can customize this based on your business logic
         
         # Check if we have customer data for this number
-        logger.info(f"=== LOOKING UP CUSTOMER DATA ===")
-        logger.info(f"Looking up to_number: {to_number}")
+        # Removed verbose customer data lookup logging to reduce bloat
         
         lookup_start = time.time()
         customer_data = self._get_customer_data(to_number)
         lookup_duration = time.time() - lookup_start
-        logger.info(f"Airtable lookup duration: {lookup_duration:.3f}s")
-        
-        logger.info(f"Customer data found: {customer_data is not None}")
-        if customer_data:
-            logger.info(f"Customer data: {customer_data}")
+        # Removed lookup duration logging to reduce bloat
         
         if customer_data:
             # Known customer - use their specific dynamic variables from Airtable
             dynamic_vars = customer_data
-            logger.info(f"Using Airtable dynamic variables: {dynamic_vars}")
             
             # Override agent if customer has a preferred agent
             if customer_data.get('preferred_agent_id'):
                 response["call_inbound"]["override_agent_id"] = customer_data['preferred_agent_id']
-                logger.info(f"Overriding agent to: {customer_data['preferred_agent_id']}")
             
         else:
             # Unknown caller - use default configuration
@@ -217,9 +168,6 @@ class WebhookService:
                 "company_name": "Your Company",
                 "company_name_agent": "Assistant"
             }
-            logger.info(f"Using default dynamic variables: {dynamic_vars}")
-        
-        logger.info(f"=== END CUSTOMER DATA LOOKUP ===")
         
         # Add metadata for tracking
         metadata = {
@@ -410,22 +358,13 @@ class WebhookService:
         # Extract call object from Retell webhook format
         call_data = data.get('call', {})
         
-        # Log all available fields for debugging
-        logger.info(f"=== EXTRACTING FIELDS ===")
-        logger.info(f"Call data keys: {list(call_data.keys())}")
-        logger.info(f"Raw data keys: {list(data.keys())}")
+        # Removed verbose field extraction logging to reduce bloat
         
         # Check for fields that might be at different levels
         recording_url = call_data.get('recording_url', '')
         duration_ms = call_data.get('duration_ms', 0)
         collected_dynamic_variables = call_data.get('collected_dynamic_variables', {})
         call_cost = call_data.get('call_cost', {})
-        
-        logger.info(f"Recording URL: {recording_url}")
-        logger.info(f"Duration MS: {duration_ms}")
-        logger.info(f"Collected Dynamic Variables: {collected_dynamic_variables}")
-        logger.info(f"Call Cost: {call_cost}")
-        logger.info(f"=== END EXTRACTING FIELDS ===")
         
         # Calculate duration from timestamps
         start_timestamp = call_data.get('start_timestamp', 0)
@@ -683,56 +622,31 @@ class WebhookService:
                 'node_transcript': webhook_data.get('node_transcript', '')
             }
             
-            logger.info(f"=== SAVING TO AIRTABLE ===")
-            logger.info(f"Event: {airtable_record['event']}")
-            logger.info(f"Call ID: {airtable_record['call_id']}")
-            logger.info(f"From: {airtable_record['from_number']} -> To: {airtable_record['to_number']}")
-            logger.info(f"Direction: {airtable_record['direction']}")
-            logger.info(f"Call Status: {airtable_record['call_status']}")
-            logger.info(f"Duration (ms): {airtable_record.get('duration_ms', 0)}")
-            logger.info(f"Recording URL (raw): {webhook_data.get('recording_url', 'N/A')}")
-            logger.info(f"Recording URL (raw type): {type(webhook_data.get('recording_url', 'N/A'))}")
-            logger.info(f"Recording URL (length): {len(webhook_data.get('recording_url', ''))}")
-            logger.info(f"Recording URL (saved): {airtable_record.get('recording_url', 'N/A')}")
-            logger.info(f"Recording URL (saved type): {type(airtable_record.get('recording_url', 'N/A'))}")
-            logger.info(f"Recording URL (saved length): {len(airtable_record.get('recording_url', ''))}")
-            logger.info(f"Call Cost (raw): {webhook_data.get('call_cost', 'N/A')}")
-            logger.info(f"Call Cost (JSON): {airtable_record.get('call_cost', 'N/A')}")
-            logger.info(f"Collected Dynamic Variables: {airtable_record.get('collected_dynamic_variables', 'N/A')}")
-            logger.info(f"Transcript length: {len(airtable_record['transcript']) if airtable_record['transcript'] else 0}")
-            logger.info(f"opt_out_sensitive_data_storage: {airtable_record['opt_out_sensitive_data_storage']} (type: {type(airtable_record['opt_out_sensitive_data_storage'])})")
-            logger.info(f"Call Analysis present: {'call_analysis' in airtable_record and airtable_record['call_analysis'] != '{}'}")
-            logger.info(f"Twilio Call SID: {airtable_record.get('twilio_call_sid', 'N/A')}")
-            logger.info(f"Created Time: {airtable_record.get('created_time', 'N/A')}")
-            logger.info(f"Node Transcript length: {len(airtable_record.get('node_transcript', ''))}")
-            logger.info(f"Node Transcript present: {bool(airtable_record.get('node_transcript', ''))}")
-            logger.info(f"=== END AIRTABLE SAVE ===")
+            # Removed verbose Airtable save logging to reduce bloat
             
             record = airtable_service.create_record(airtable_record)
             if record:
                 record_id = record.get('id', 'unknown')
-                logger.info(f"Saved webhook to Airtable: {record_id}")
+                # Get cost for logging
+                call_cost = webhook_data.get('call_cost', {})
+                combined_cost = call_cost.get('combined_cost', 0)
+                cost_str = f"€{combined_cost:.2f}" if combined_cost > 0 else "€0.00"
+                logger.info(f"Saved to Airtable: {record_id} ({cost_str})")
                 
                 # Add recording file attachment if recording_url exists
                 recording_url = webhook_data.get('recording_url', '').strip()
                 if recording_url:
-                    logger.info(f"Processing recording file for record: {record_id}")
                     call_id = webhook_data.get('call_id', 'unknown')
                     created_time = airtable_record.get('created_time', '')
                     recording_success = airtable_service.download_and_upload_recording(
                         recording_url, record_id, call_id, created_time
                     )
                     if recording_success:
-                        logger.info(f"Successfully added recording file to record: {record_id}")
-                        
                         # Transcribe audio with Deepgram after recording is saved
-                        logger.info(f"Starting Deepgram transcription for record: {record_id}")
                         deepgram_service = get_deepgram_service()
                         deepgram_transcription = deepgram_service.transcribe_audio_url(recording_url)
                         
                         if deepgram_transcription:
-                            logger.info(f"Deepgram transcription completed for record: {record_id}")
-                            
                             # Save Deepgram transcription to Airtable
                             update_data = {
                                 'deepgram_transcription': deepgram_transcription
@@ -740,15 +654,13 @@ class WebhookService:
                             
                             updated_record = airtable_service.update_record(record_id, update_data)
                             if updated_record:
-                                logger.info(f"Successfully saved Deepgram transcription to record: {record_id}")
+                                logger.info(f"Deepgram: \"{deepgram_transcription[:50]}{'...' if len(deepgram_transcription) > 50 else ''}\"")
                             else:
                                 logger.error(f"Failed to save Deepgram transcription to record: {record_id}")
                         else:
                             logger.warning(f"Deepgram transcription failed for record: {record_id}")
                     else:
                         logger.warning(f"Failed to add recording file to record: {record_id}")
-                else:
-                    logger.info(f"No recording URL found for record: {record_id}")
                 
                 # Process language linking after record is saved
                 self._process_language_linking(record_id, webhook_data)
@@ -780,7 +692,7 @@ class WebhookService:
     
     def _handle_call_ended(self, webhook_data: Dict[str, Any]) -> None:
         """Handle call ended event"""
-        logger.info(f"Call ended: {webhook_data['call_id']}")
+        # Removed verbose call ended logging to reduce bloat
         
         # Add your custom logic for call ended events
         # For example: trigger follow-up actions, send notifications, etc.
@@ -840,8 +752,9 @@ class WebhookService:
             updated_record = airtable_service.update_record(record_id, update_data)
             
             if updated_record:
-                # Only log what was saved in the call_analysis field
-                logger.info(f"Call analysis saved for {call_id}: {call_analysis}")
+                # Extract key info for minimal logging
+                sentiment = call_analysis.get('user_sentiment', 'Unknown')
+                logger.info(f"Call analysis: {call_id} - {sentiment} sentiment")
             else:
                 logger.error(f"Failed to update record {record_id} with call_analysis for call_id: {call_id}")
                 
@@ -869,8 +782,6 @@ class WebhookService:
                 logger.info(f"No caller_language found in collected_dynamic_variables for record: {record_id}")
                 return
             
-            logger.info(f"Processing language linking for record {record_id} with caller_language: {caller_language}")
-            
             # Search for matching language record in the 'language' table
             language_records = airtable_service.search_records_in_table('language', 'language_name', caller_language)
             
@@ -889,13 +800,11 @@ class WebhookService:
                 logger.error(f"Language record found but no ID available for '{caller_language}'")
                 return
             
-            logger.info(f"Found language record: {language_record_id} for '{caller_language}'")
-            
             # Link the language record to the event record
             link_success = airtable_service.link_record(record_id, 'language', [language_record_id])
             
             if link_success:
-                logger.info(f"Successfully linked language record {language_record_id} to event record {record_id}")
+                logger.info(f"Language linked: {caller_language}")
             else:
                 logger.error(f"Failed to link language record {language_record_id} to event record {record_id}")
                 

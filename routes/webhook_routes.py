@@ -24,7 +24,7 @@ def retell_webhook():
         # Reduce logging for call_analyzed events to reduce log bloat
         event_type = data.get('event', 'unknown')
         if event_type != 'call_analyzed':
-            logger.info(f"Received webhook from Retell AI: {event_type}")
+            # Removed verbose webhook reception logging to reduce bloat
         else:
             logger.info(f"Received call_analyzed webhook - Call ID: {data.get('call', {}).get('call_id', 'unknown')}")
         
@@ -54,7 +54,7 @@ def inbound_webhook():
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
         
-        logger.info(f"Received inbound webhook from Retell AI: {data.get('event', 'unknown')}")
+        # Removed verbose inbound webhook logging to reduce bloat
         
         # Process the inbound webhook using the service
         response_data = webhook_service.process_inbound_webhook(data)

@@ -67,7 +67,7 @@ class AirtableService:
         
         try:
             record = self.table.create(data)
-            logger.info(f"Created Airtable record: {record.get('id', 'unknown')}")
+            # Removed verbose record creation logging to reduce bloat
             return record
         except Exception as e:
             logger.error(f"Failed to create Airtable record: {e}")
@@ -94,7 +94,7 @@ class AirtableService:
             else:
                 records = self.table.all(max_records=max_records)
             
-            logger.info(f"Retrieved {len(records)} records from Airtable")
+            # Removed verbose record retrieval logging to reduce bloat
             return records
         except Exception as e:
             logger.error(f"Failed to retrieve Airtable records: {e}")
@@ -116,7 +116,7 @@ class AirtableService:
         
         try:
             record = self.table.get(record_id)
-            logger.info(f"Retrieved Airtable record: {record_id}")
+            # Removed verbose record retrieval logging to reduce bloat
             return record
         except Exception as e:
             logger.error(f"Failed to retrieve Airtable record {record_id}: {e}")
@@ -145,7 +145,7 @@ class AirtableService:
         
         try:
             record = self.table.update(record_id, data)
-            logger.info(f"Updated Airtable record: {record_id}")
+            # Removed verbose record update logging to reduce bloat
             return record
         except Exception as e:
             logger.error(f"Failed to update Airtable record {record_id}: {e}")
@@ -191,7 +191,7 @@ class AirtableService:
         try:
             formula = f"{{{field}}} = '{value}'"
             records = self.table.all(formula=formula)
-            logger.info(f"Found {len(records)} records matching {field}={value}")
+            # Removed verbose search logging to reduce bloat
             return records
         except Exception as e:
             logger.error(f"Failed to search Airtable records: {e}")
@@ -322,21 +322,19 @@ class AirtableService:
             return False
         
         try:
-            logger.info(f"Downloading recording from: {recording_url}")
+            # Removed verbose download logging to reduce bloat
             
             # Download the file
             response = requests.get(recording_url, stream=True, timeout=30)
             response.raise_for_status()
             
-            # Get file size for logging
-            file_size = len(response.content)
-            logger.info(f"Downloaded recording file, size: {file_size} bytes")
+            # Removed file size logging to reduce bloat
             
             # Format the filename with call_id and created_time
             safe_created_time = created_time.replace(':', '-').replace('.', '-').replace('T', '_')
             filename = f"call_{call_id}_{safe_created_time}.wav"
             
-            logger.info(f"Generated filename: {filename}")
+            # Removed filename logging to reduce bloat
             
             # Create a temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
@@ -345,11 +343,11 @@ class AirtableService:
             
             try:
                 # Upload to Airtable as attachment
-                logger.info(f"Uploading recording to Airtable record: {record_id}")
+                # Removed verbose upload logging to reduce bloat
                 
                 # For Airtable attachments, we use URL references
                 # Airtable will download and store the file from the URL
-                logger.info(f"Adding recording URL to Airtable attachment field: {filename}")
+                # Removed verbose attachment logging to reduce bloat
                 
                 # Create attachment data with URL (Airtable will download and store the file)
                 attachment_data = {
@@ -364,7 +362,7 @@ class AirtableService:
                 updated_record = self.update_record(record_id, update_data)
                 
                 if updated_record:
-                    logger.info(f"Successfully added recording URL to Airtable record: {record_id}")
+                    # Removed verbose success logging to reduce bloat
                     return True
                 else:
                     logger.error(f"Failed to add recording URL to record: {record_id}")
@@ -374,7 +372,7 @@ class AirtableService:
                 # Clean up temporary file
                 if os.path.exists(temp_file_path):
                     os.unlink(temp_file_path)
-                    logger.info("Cleaned up temporary recording file")
+                    # Removed cleanup logging to reduce bloat
         
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to download recording from {recording_url}: {e}")
