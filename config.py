@@ -14,6 +14,7 @@ print(f"AIRTABLE_API_KEY: {os.getenv('AIRTABLE_API_KEY', 'NOT SET')}")
 print(f"AIRTABLE_BASE_ID: {os.getenv('AIRTABLE_BASE_ID', 'NOT SET')}")
 print(f"AIRTABLE_TABLE_NAME: {os.getenv('AIRTABLE_TABLE_NAME', 'NOT SET')}")
 print(f"OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY', 'NOT SET')}")
+print(f"DEEPGRAM_API_KEY: {os.getenv('DEEPGRAM_API_KEY', 'NOT SET')}")
 print("=== END DEBUG ===")
 
 class Config:
@@ -34,6 +35,9 @@ class Config:
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    
+    # Deepgram Configuration
+    DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
     
     # Redis Configuration
     REDIS_URL = os.getenv('REDIS_URL')
@@ -62,6 +66,7 @@ class Config:
         print(f"Config validation - AIRTABLE_BASE_ID: {'SET' if cls.AIRTABLE_BASE_ID else 'NOT SET'}")
         print(f"Config validation - AIRTABLE_TABLE_NAME: {cls.AIRTABLE_TABLE_NAME}")
         print(f"Config validation - OPENAI_API_KEY: {'SET' if cls.OPENAI_API_KEY else 'NOT SET'}")
+        print(f"Config validation - DEEPGRAM_API_KEY: {'SET' if cls.DEEPGRAM_API_KEY else 'NOT SET'}")
             
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")

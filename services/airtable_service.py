@@ -197,6 +197,62 @@ class AirtableService:
             logger.error(f"Failed to search Airtable records: {e}")
             return []
     
+    def search_records_in_table(self, table_name: str, field: str, value: str) -> List[Dict[str, Any]]:
+        """
+        Search records by field value in a specific table
+        
+        Args:
+            table_name: Name of the table to search in
+            field: Field name to search
+            value: Value to search for
+        
+        Returns:
+            List of matching records
+        """
+        if not self.is_configured():
+            logger.error("Airtable service not configured")
+            return []
+        
+        try:
+            # Create a temporary table instance for the specified table
+            temp_table = Table(self.api_key, self.base_id, table_name)
+            formula = f"{{{field}}} = '{value}'"
+            records = temp_table.all(formula=formula)
+            logger.info(f"Found {len(records)} records in table '{table_name}' matching {field}={value}")
+            return records
+        except Exception as e:
+            logger.error(f"Failed to search records in table '{table_name}': {e}")
+            return []
+    
+    def link_record(self, record_id: str, field_name: str, linked_record_ids: List[str]) -> bool:
+        """
+        Link records to a field (for linked record fields)
+        
+        Args:
+            record_id: ID of the record to update
+            field_name: Name of the field to link to
+            linked_record_ids: List of record IDs to link
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.is_configured():
+            logger.error("Airtable service not configured")
+            return False
+        
+        try:
+            update_data = {field_name: linked_record_ids}
+            updated_record = self.update_record(record_id, update_data)
+            if updated_record:
+                logger.info(f"Successfully linked {len(linked_record_ids)} records to field '{field_name}' in record {record_id}")
+                return True
+            else:
+                logger.error(f"Failed to link records to field '{field_name}' in record {record_id}")
+                return False
+        except Exception as e:
+            logger.error(f"Error linking records: {e}")
+            return False
+    
     def batch_create_records(self, records_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Create multiple records in batch

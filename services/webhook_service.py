@@ -11,7 +11,7 @@ from config import Config
 from utils.logger import get_logger
 from utils.validators import validate_retell_webhook, validate_retell_inbound_webhook, sanitize_webhook_data
 from services.airtable_service import airtable_service
-from services.whisper_service import get_whisper_service
+from services.deepgram_service import get_deepgram_service
 from services.redis_client import redis_client, is_redis_configured
 
 logger = get_logger(__name__)
@@ -712,30 +712,33 @@ class WebhookService:
                     if recording_success:
                         logger.info(f"Successfully added recording file to record: {record_id}")
                         
-                        # Transcribe audio with Whisper after recording is saved
-                        logger.info(f"Starting Whisper transcription for record: {record_id}")
-                        whisper_service = get_whisper_service()
-                        whisper_transcription = whisper_service.transcribe_audio_url(recording_url)
+                        # Transcribe audio with Deepgram after recording is saved
+                        logger.info(f"Starting Deepgram transcription for record: {record_id}")
+                        deepgram_service = get_deepgram_service()
+                        deepgram_transcription = deepgram_service.transcribe_audio_url(recording_url)
                         
-                        if whisper_transcription:
-                            logger.info(f"Whisper transcription completed for record: {record_id}")
+                        if deepgram_transcription:
+                            logger.info(f"Deepgram transcription completed for record: {record_id}")
                             
-                            # Save Whisper transcription to Airtable
+                            # Save Deepgram transcription to Airtable
                             update_data = {
-                                'whisper_transcription': whisper_transcription
+                                'deepgram_transcription': deepgram_transcription
                             }
                             
                             updated_record = airtable_service.update_record(record_id, update_data)
                             if updated_record:
-                                logger.info(f"Successfully saved Whisper transcription to record: {record_id}")
+                                logger.info(f"Successfully saved Deepgram transcription to record: {record_id}")
                             else:
-                                logger.error(f"Failed to save Whisper transcription to record: {record_id}")
+                                logger.error(f"Failed to save Deepgram transcription to record: {record_id}")
                         else:
-                            logger.warning(f"Whisper transcription failed for record: {record_id}")
+                            logger.warning(f"Deepgram transcription failed for record: {record_id}")
                     else:
                         logger.warning(f"Failed to add recording file to record: {record_id}")
                 else:
                     logger.info(f"No recording URL found for record: {record_id}")
+                
+                # Process language linking after record is saved
+                self._process_language_linking(record_id, webhook_data)
                 
                 return True
             else:
@@ -834,6 +837,60 @@ class WebhookService:
                 
         except Exception as e:
             logger.error(f"Error updating call_analysis for call_id {call_id}: {e}")
+    
+    def _process_language_linking(self, record_id: str, webhook_data: Dict[str, Any]) -> None:
+        """
+        Process language linking based on collected_dynamic_variables
+        
+        Args:
+            record_id: ID of the saved Airtable record
+            webhook_data: Webhook data containing collected_dynamic_variables
+        """
+        try:
+            # Extract collected_dynamic_variables
+            collected_vars = webhook_data.get('collected_dynamic_variables', {})
+            if not collected_vars:
+                logger.info(f"No collected_dynamic_variables found for record: {record_id}")
+                return
+            
+            # Extract caller_language
+            caller_language = collected_vars.get('caller_language')
+            if not caller_language:
+                logger.info(f"No caller_language found in collected_dynamic_variables for record: {record_id}")
+                return
+            
+            logger.info(f"Processing language linking for record {record_id} with caller_language: {caller_language}")
+            
+            # Search for matching language record in the 'language' table
+            language_records = airtable_service.search_records_in_table('language', 'language_name', caller_language)
+            
+            if not language_records:
+                logger.warning(f"No language record found for '{caller_language}' in language table")
+                return
+            
+            if len(language_records) > 1:
+                logger.warning(f"Multiple language records found for '{caller_language}', using first one")
+            
+            # Get the first matching language record
+            language_record = language_records[0]
+            language_record_id = language_record.get('id')
+            
+            if not language_record_id:
+                logger.error(f"Language record found but no ID available for '{caller_language}'")
+                return
+            
+            logger.info(f"Found language record: {language_record_id} for '{caller_language}'")
+            
+            # Link the language record to the event record
+            link_success = airtable_service.link_record(record_id, 'language', [language_record_id])
+            
+            if link_success:
+                logger.info(f"Successfully linked language record {language_record_id} to event record {record_id}")
+            else:
+                logger.error(f"Failed to link language record {language_record_id} to event record {record_id}")
+                
+        except Exception as e:
+            logger.error(f"Error processing language linking for record {record_id}: {e}")
     
     def get_webhook_statistics(self, hours: int = 24) -> Dict[str, Any]:
         """
