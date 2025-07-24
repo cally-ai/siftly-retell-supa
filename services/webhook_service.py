@@ -649,9 +649,34 @@ class WebhookService:
                         recording_url, record_id, call_id, created_time
                     )
                     if recording_success:
-                        # Transcribe audio with Deepgram after recording is saved
+                        # Get Deepgram configuration from the Airtable record we just saved
+                        try:
+                            # Retrieve the record to get Deepgram settings
+                            record_data = airtable_service.get_record(record_id)
+                            if record_data and 'fields' in record_data:
+                                fields = record_data['fields']
+                                deepgram_model = fields.get('deepgram_model', 'nova-3')  # Default to nova-3
+                                deepgram_language_code = fields.get('deepgram_language_code', None)  # None for auto-detect
+                                
+                                logger.info(f"Using Deepgram model: {deepgram_model}, language: {deepgram_language_code or 'auto-detect'}")
+                            else:
+                                # Fallback to defaults if record not found
+                                deepgram_model = 'nova-3'
+                                deepgram_language_code = None
+                                logger.warning(f"Could not retrieve Deepgram settings from record {record_id}, using defaults")
+                        except Exception as e:
+                            # Fallback to defaults if error
+                            deepgram_model = 'nova-3'
+                            deepgram_language_code = None
+                            logger.warning(f"Error retrieving Deepgram settings: {e}, using defaults")
+                        
+                        # Transcribe audio with Deepgram using retrieved settings
                         deepgram_service = get_deepgram_service()
-                        deepgram_transcription = deepgram_service.transcribe_audio_url(recording_url)
+                        deepgram_transcription = deepgram_service.transcribe_audio_url(
+                            recording_url, 
+                            language=deepgram_language_code, 
+                            model=deepgram_model
+                        )
                         
                         if deepgram_transcription:
                             # Save Deepgram transcription to Airtable
