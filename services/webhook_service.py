@@ -37,10 +37,28 @@ class WebhookService:
         Returns:
             Processed webhook data with additional insights
         """
-        # === COMPREHENSIVE PAYLOAD LOGGING ===
-        logger.info(f"=== FULL WEBHOOK PAYLOAD RECEIVED ===")
-        logger.info(f"Raw payload: {data}")
-        logger.info(f"=== END FULL PAYLOAD ===")
+        # Add webhook deduplication logging (skip detailed logging for call_started)
+        call_id = data.get('call', {}).get('call_id', 'unknown')
+        event_type = data.get('event', 'unknown')
+        
+        # Skip detailed logging for call_started and call_analyzed events to reduce log bloat
+        if event_type not in ['call_started', 'call_analyzed']:
+            # === COMPREHENSIVE PAYLOAD LOGGING ===
+            logger.info(f"=== FULL WEBHOOK PAYLOAD RECEIVED ===")
+            logger.info(f"Raw payload: {data}")
+            logger.info(f"=== END FULL PAYLOAD ===")
+            
+            logger.info(f"=== WEBHOOK DEDUPLICATION INFO ===")
+            logger.info(f"Call ID: {call_id}")
+            logger.info(f"Event Type: {event_type}")
+            logger.info(f"Timestamp: {datetime.now().isoformat()}")
+            logger.info(f"=== END DEDUPLICATION INFO ===")
+        elif event_type == 'call_started':
+            # Minimal logging for call_started events
+            logger.info(f"Call started webhook received - Call ID: {call_id}")
+        elif event_type == 'call_analyzed':
+            # Minimal logging for call_analyzed events
+            logger.info(f"Call analyzed webhook received - Call ID: {call_id}")
         
         event_type = data.get('event', 'unknown')
         logger.info(f"=== CALL EVENT WEBHOOK RECEIVED ===")
@@ -470,8 +488,7 @@ class WebhookService:
         node_end = None
         buffer = []
         
-        logger.info(f"=== GENERATING NODE TRANSCRIPT ===")
-        logger.info(f"Total transcript steps: {len(transcript_with_tool_calls)}")
+        # Removed logging to reduce log bloat
         
         # Loop over transcript entries
         for step in transcript_with_tool_calls:
@@ -480,14 +497,12 @@ class WebhookService:
                 if buffer and node_start is not None and node_end is not None:
                     node_summary = f"[Node: {current_node}] (Start: {node_start:.4f}s - End: {node_end:.4f}s)\n" + "\n".join(buffer)
                     node_summaries.append(node_summary)
-                    logger.info(f"Finalized node: {current_node} ({node_start:.4f}s - {node_end:.4f}s)")
                 
                 # Transition to the new node
                 current_node = step.get('new_node_name', 'unknown')
                 buffer = []
                 node_start = None
                 node_end = None
-                logger.info(f"Transitioning to node: {current_node}")
                 continue
             
             if step.get('role') == "agent" and step.get('words'):
@@ -499,11 +514,9 @@ class WebhookService:
                     node_start = node_start or first.get('start', 0)
                     node_end = last.get('end', 0)
                     buffer.append(f'Agent: "{step.get("content", "")}"')
-                    logger.info(f"Agent speech: {len(words)} words, time range: {first.get('start', 0):.4f}s - {last.get('end', 0):.4f}s")
             
             if step.get('role') == "dtmf":
                 buffer.append(f'User: Pressed DTMF "{step.get("digit", "")}"')
-                logger.info(f"DTMF input: {step.get('digit', '')}")
             
             if step.get('role') == "tool_call_invocation":
                 tool_name = step.get('name', '')
@@ -513,7 +526,6 @@ class WebhookService:
                         detected = next((arg for arg in args if arg.get('name') == "caller_language"), None)
                         if detected:
                             buffer.append("System: Detected language as Dutch")
-                            logger.info("Language detection: Dutch")
                     except (json.JSONDecodeError, KeyError):
                         logger.warning("Failed to parse extract_dynamic_variables arguments")
                 
@@ -522,7 +534,6 @@ class WebhookService:
                         args = json.loads(step.get('arguments', '{}'))
                         agent_id = args.get('agentId', 'unknown')
                         buffer.append(f"System: Swapped to Dutch agent ({agent_id})")
-                        logger.info(f"Agent swap: {agent_id}")
                     except (json.JSONDecodeError, KeyError):
                         logger.warning("Failed to parse agent_swap arguments")
             
@@ -531,7 +542,6 @@ class WebhookService:
                     content = json.loads(step.get('content', '{}'))
                     status = content.get('status', 'Unknown transfer status')
                     buffer.append(f"System: {status}")
-                    logger.info(f"Transfer result: {status}")
                 except (json.JSONDecodeError, KeyError):
                     logger.warning("Failed to parse tool_call_result content")
         
@@ -539,12 +549,9 @@ class WebhookService:
         if buffer and node_start is not None and node_end is not None:
             node_summary = f"[Node: {current_node}] (Start: {node_start:.4f}s - End: {node_end:.4f}s)\n" + "\n".join(buffer)
             node_summaries.append(node_summary)
-            logger.info(f"Finalized final node: {current_node} ({node_start:.4f}s - {node_end:.4f}s)")
         
         # Join the full transcript string
         full_transcript = "\n\n".join(node_summaries)
-        logger.info(f"Generated node transcript with {len(node_summaries)} nodes")
-        logger.info(f"=== END NODE TRANSCRIPT ===")
         
         return full_transcript
     
@@ -634,6 +641,14 @@ class WebhookService:
             logger.info(f"Skipping Airtable save for event type: {event_type} (only saving 'call_ended' events)")
             return True  # Return True since this is expected behavior
         
+        # Check if a record with this call_id already exists to prevent duplicates
+        call_id = webhook_data.get('call_id', '')
+        if call_id:
+            existing_records = airtable_service.search_records('call_id', call_id)
+            if existing_records:
+                logger.warning(f"Record with call_id {call_id} already exists, skipping duplicate save")
+                return True  # Return True since this is expected behavior
+        
         if not airtable_service.is_configured():
             logger.warning("Airtable not configured, skipping save")
             return False
@@ -685,8 +700,6 @@ class WebhookService:
             logger.info(f"Call Cost (JSON): {airtable_record.get('call_cost', 'N/A')}")
             logger.info(f"Collected Dynamic Variables: {airtable_record.get('collected_dynamic_variables', 'N/A')}")
             logger.info(f"Transcript length: {len(airtable_record['transcript']) if airtable_record['transcript'] else 0}")
-            logger.info(f"Transcript object present: {'transcript_object' in airtable_record and airtable_record['transcript_object'] != '[]'}")
-            logger.info(f"Transcript with tool calls present: {'transcript_with_tool_calls' in airtable_record and airtable_record['transcript_with_tool_calls'] != '[]'}")
             logger.info(f"opt_out_sensitive_data_storage: {airtable_record['opt_out_sensitive_data_storage']} (type: {type(airtable_record['opt_out_sensitive_data_storage'])})")
             logger.info(f"Call Analysis present: {'call_analysis' in airtable_record and airtable_record['call_analysis'] != '{}'}")
             logger.info(f"Twilio Call SID: {airtable_record.get('twilio_call_sid', 'N/A')}")
@@ -778,7 +791,8 @@ class WebhookService:
     
     def _handle_call_started(self, webhook_data: Dict[str, Any]) -> None:
         """Handle call started event"""
-        logger.info(f"Call started: {webhook_data['call_id']}")
+        # Minimal logging for call started events to reduce log bloat
+        # logger.info(f"Call started: {webhook_data['call_id']}")
         
         # Add your custom logic for call started events
         # For example: log call initiation, update status, etc.
@@ -786,15 +800,12 @@ class WebhookService:
     def _handle_call_analyzed(self, webhook_data: Dict[str, Any]) -> None:
         """Handle call analyzed event - update existing record with call_analysis data"""
         call_id = webhook_data['call_id']
-        logger.info(f"Call analyzed: {call_id}")
         
         # Get call_analysis from the raw data
         call_analysis = webhook_data['raw_data'].get('call', {}).get('call_analysis', {})
         if not call_analysis:
             logger.warning(f"No call_analysis data found for call {call_id}")
             return
-        
-        logger.info(f"Call analysis available for {call_id}, looking up existing record...")
         
         # Look up the existing record in Airtable using call_id
         if not airtable_service.is_configured():
@@ -820,8 +831,6 @@ class WebhookService:
                 logger.error(f"No record ID found in existing record for call_id: {call_id}")
                 return
             
-            logger.info(f"Found existing record {record_id} for call_id: {call_id}")
-            
             # Prepare the update data with call_analysis
             update_data = {
                 'call_analysis': json.dumps(call_analysis)
@@ -831,7 +840,8 @@ class WebhookService:
             updated_record = airtable_service.update_record(record_id, update_data)
             
             if updated_record:
-                logger.info(f"Successfully updated record {record_id} with call_analysis for call_id: {call_id}")
+                # Only log what was saved in the call_analysis field
+                logger.info(f"Call analysis saved for {call_id}: {call_analysis}")
             else:
                 logger.error(f"Failed to update record {record_id} with call_analysis for call_id: {call_id}")
                 

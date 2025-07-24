@@ -21,7 +21,12 @@ def retell_webhook():
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
         
-        logger.info(f"Received webhook from Retell AI: {data.get('event', 'unknown')}")
+        # Reduce logging for call_analyzed events to reduce log bloat
+        event_type = data.get('event', 'unknown')
+        if event_type != 'call_analyzed':
+            logger.info(f"Received webhook from Retell AI: {event_type}")
+        else:
+            logger.info(f"Received call_analyzed webhook - Call ID: {data.get('call', {}).get('call_id', 'unknown')}")
         
         # Process the webhook using the service
         processed_data = webhook_service.process_retell_webhook(data)
