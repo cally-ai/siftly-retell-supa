@@ -23,9 +23,7 @@ def retell_webhook():
         
         # Reduce logging for call_analyzed events to reduce log bloat
         event_type = data.get('event', 'unknown')
-        if event_type != 'call_analyzed':
-            # Removed verbose webhook reception logging to reduce bloat
-        else:
+        if event_type == 'call_analyzed':
             logger.info(f"Received call_analyzed webhook - Call ID: {data.get('call', {}).get('call_id', 'unknown')}")
         
         # Process the webhook using the service
