@@ -637,6 +637,9 @@ class WebhookService:
                 cost_str = f"€{combined_cost:.2f}" if combined_cost > 0 else "€0.00"
                 logger.info(f"Saved to Airtable: {record_id} ({cost_str})")
                 
+                # Process language linking first
+                self._process_language_linking(record_id, webhook_data)
+                
                 # Add recording file attachment if recording_url exists
                 recording_url = webhook_data.get('recording_url', '').strip()
                 if recording_url:
@@ -665,9 +668,6 @@ class WebhookService:
                             logger.warning(f"Deepgram transcription failed for record: {record_id}")
                     else:
                         logger.warning(f"Failed to add recording file to record: {record_id}")
-                
-                # Process language linking after record is saved
-                self._process_language_linking(record_id, webhook_data)
                 
                 return True
             else:
