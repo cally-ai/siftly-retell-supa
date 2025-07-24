@@ -12,7 +12,7 @@ from utils.logger import get_logger
 from utils.validators import validate_retell_webhook, validate_retell_inbound_webhook, sanitize_webhook_data
 from services.airtable_service import airtable_service
 from services.deepgram_service import get_deepgram_service
-from services.redis_client import redis_client, is_redis_configured
+from services.redis_client import redis_client, redis_client_sync, is_redis_configured
 
 logger = get_logger(__name__)
 
@@ -316,10 +316,8 @@ class WebhookService:
         # Check Redis cache first if configured
         if is_redis_configured():
             try:
-                # Use ThreadPoolExecutor to run async Redis operations in sync context
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    cached_data = executor.submit(lambda: asyncio.run(redis_client.get(to_number))).result()
+                # Use synchronous Redis client to avoid event loop conflicts
+                cached_data = redis_client_sync.get(to_number)
                 
                 if cached_data:
                     logger.info(f"Redis cache hit for {to_number}")
@@ -340,9 +338,8 @@ class WebhookService:
             # Cache result in Redis if found and Redis is configured
             if data and is_redis_configured():
                 try:
-                    # Use ThreadPoolExecutor to run async Redis operations in sync context
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        executor.submit(lambda: asyncio.run(redis_client.set(to_number, json.dumps(data), ex=10800))).result()
+                    # Use synchronous Redis client to avoid event loop conflicts
+                    redis_client_sync.set(to_number, json.dumps(data), ex=10800)  # 3 hours TTL
                     logger.info(f"Cached data for {to_number} in Redis")
                 except Exception as e:
                     logger.warning(f"Failed to cache data for {to_number}: {e}")
