@@ -42,9 +42,9 @@ def retell_webhook():
         logger.error(f"Error processing webhook: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
-@webhook_bp.route('/function/siftly_check_business_hours', methods=['POST'])
-def siftly_check_business_hours():
-    """Handle siftly_check_business_hours function call from Retell AI"""
+@webhook_bp.route('/function/check_business_hours', methods=['POST'])
+def check_business_hours():
+    """Handle check_business_hours function call from Retell AI"""
     try:
         # Get the JSON data from the request
         data = request.get_json()

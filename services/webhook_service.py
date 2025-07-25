@@ -29,7 +29,7 @@ class WebhookService:
 
     def process_business_hours_check(self, data: Dict[str, Any]) -> Dict[str, str]:
         """
-        Process siftly_check_business_hours function call from Retell AI
+        Process check_business_hours function call from Retell AI
         
         Args:
             data: Function call data from Retell AI
@@ -40,7 +40,7 @@ class WebhookService:
         try:
             # Step 1: Parse the incoming request
             function_name = data.get('name', '')
-            if function_name != 'siftly_check_business_hours':
+            if function_name not in ['siftly_check_business_hours', 'check_business_hours']:
                 raise ValueError(f"Invalid function name: {function_name}")
             
             # Extract client_id from args or call
