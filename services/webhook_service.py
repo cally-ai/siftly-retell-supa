@@ -66,6 +66,10 @@ class WebhookService:
             timezone_str = client_data.get('timezone')
             opening_hours = client_data.get('opening_hours', [])
             
+            # Debug logging
+            logger.info(f"Timezone field type: {type(timezone_str)}, value: {timezone_str}")
+            logger.info(f"Opening hours count: {len(opening_hours)}")
+            
             if not timezone_str:
                 logger.warning(f"No timezone configured for client_id: {client_id}")
                 return {"within_business_hours": "0"}
@@ -76,6 +80,15 @@ class WebhookService:
             
             # Step 4: Convert to client's timezone and evaluate business hours
             try:
+                # Handle timezone if it's a list (take first item)
+                if isinstance(timezone_str, list):
+                    timezone_str = timezone_str[0] if timezone_str else None
+                    logger.info(f"Extracted timezone from list: {timezone_str}")
+                
+                if not timezone_str:
+                    logger.warning(f"No valid timezone found for client_id: {client_id}")
+                    return {"within_business_hours": "0"}
+                
                 client_tz = pytz.timezone(timezone_str)
                 client_local_time = current_utc_time.replace(tzinfo=pytz.UTC).astimezone(client_tz)
                 logger.info(f"Client local time ({timezone_str}): {client_local_time}")
@@ -146,7 +159,9 @@ class WebhookService:
                 try:
                     hours_record = opening_hours_table.get(hours_id)
                     if hours_record:
-                        opening_hours_records.append(hours_record['fields'])
+                        fields = hours_record['fields']
+                        logger.info(f"Opening hours record {hours_id}: {fields}")
+                        opening_hours_records.append(fields)
                 except Exception as e:
                     logger.warning(f"Error getting opening hours record {hours_id}: {e}")
                     continue
