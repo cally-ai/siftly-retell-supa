@@ -139,7 +139,7 @@ class WebhookService:
                 return None
             
             # Get opening hours records
-            opening_hours_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblOpeningHours')
+            opening_hours_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblHNQIWJn1QzEj6r')
             opening_hours_records = []
             
             for hours_id in opening_hours_ids:
