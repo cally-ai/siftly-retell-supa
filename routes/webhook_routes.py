@@ -42,6 +42,28 @@ def retell_webhook():
         logger.error(f"Error processing webhook: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@webhook_bp.route('/function/siftly_check_business_hours', methods=['POST'])
+def siftly_check_business_hours():
+    """Handle siftly_check_business_hours function call from Retell AI"""
+    try:
+        # Get the JSON data from the request
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No JSON data received'}), 400
+        
+        # Process the business hours check using the service
+        result = webhook_service.process_business_hours_check(data)
+        
+        return jsonify(result), 200
+        
+    except ValueError as e:
+        logger.error(f"Validation error in business hours check: {e}")
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error processing business hours check: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
 @webhook_bp.route('/inbound', methods=['POST'])
 def inbound_webhook():
     """Handle inbound call webhooks from Retell AI"""

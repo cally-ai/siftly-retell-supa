@@ -6,6 +6,7 @@ import asyncio
 import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import pytz
 from pyairtable import Table
 from config import Config
 from utils.logger import get_logger
@@ -26,7 +27,183 @@ class WebhookService:
             'broken', 'error', 'failed', 'support', 'assistance', 'critical'
         ]
 
-    
+    def process_business_hours_check(self, data: Dict[str, Any]) -> Dict[str, str]:
+        """
+        Process siftly_check_business_hours function call from Retell AI
+        
+        Args:
+            data: Function call data from Retell AI
+        
+        Returns:
+            Response with within_business_hours status
+        """
+        try:
+            # Step 1: Parse the incoming request
+            function_name = data.get('name', '')
+            if function_name != 'siftly_check_business_hours':
+                raise ValueError(f"Invalid function name: {function_name}")
+            
+            # Extract client_id from args or call
+            args = data.get('args', {})
+            call_data = data.get('call', {})
+            client_id = args.get('client_id') or call_data.get('client_id')
+            
+            if not client_id:
+                raise ValueError("client_id not found in request")
+            
+            logger.info(f"Processing business hours check for client_id: {client_id}")
+            
+            # Step 2: Get the current server time
+            current_utc_time = datetime.utcnow()
+            logger.info(f"Current UTC time: {current_utc_time}")
+            
+            # Step 3: Look up the client in Airtable
+            client_data = self._get_client_business_hours(client_id)
+            if not client_data:
+                logger.warning(f"Client not found or no business hours configured for client_id: {client_id}")
+                return {"within_business_hours": "0"}
+            
+            timezone_str = client_data.get('timezone')
+            opening_hours = client_data.get('opening_hours', [])
+            
+            if not timezone_str:
+                logger.warning(f"No timezone configured for client_id: {client_id}")
+                return {"within_business_hours": "0"}
+            
+            if not opening_hours:
+                logger.warning(f"No opening hours configured for client_id: {client_id}")
+                return {"within_business_hours": "0"}
+            
+            # Step 4: Convert to client's timezone and evaluate business hours
+            try:
+                client_tz = pytz.timezone(timezone_str)
+                client_local_time = current_utc_time.replace(tzinfo=pytz.UTC).astimezone(client_tz)
+                logger.info(f"Client local time ({timezone_str}): {client_local_time}")
+                
+                # Get current weekday (lowercase)
+                current_weekday = client_local_time.strftime('%A').lower()
+                current_time_str = client_local_time.strftime('%H:%M')
+                
+                logger.info(f"Current weekday: {current_weekday}, time: {current_time_str}")
+                
+                # Step 5: Check if within business hours
+                within_hours = self._check_business_hours(
+                    opening_hours, current_weekday, current_time_str
+                )
+                
+                result = {"within_business_hours": "1" if within_hours else "0"}
+                logger.info(f"Business hours check result: {result}")
+                return result
+                
+            except pytz.exceptions.UnknownTimeZoneError:
+                logger.error(f"Invalid timezone: {timezone_str}")
+                return {"within_business_hours": "0"}
+                
+        except Exception as e:
+            logger.error(f"Error processing business hours check: {e}")
+            return {"within_business_hours": "0"}
+
+    def _get_client_business_hours(self, client_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get client's business hours configuration from Airtable
+        
+        Args:
+            client_id: The client's Airtable record ID
+        
+        Returns:
+            Client data with timezone and opening hours, or None if not found
+        """
+        if not airtable_service.is_configured():
+            logger.error("Airtable service not configured")
+            return None
+        
+        try:
+            # Get client record
+            client_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblkyQzhGKVv6H03U')
+            client_record = client_table.get(client_id)
+            
+            if not client_record:
+                logger.warning(f"Client record not found: {client_id}")
+                return None
+            
+            client_fields = client_record['fields']
+            timezone = client_fields.get('timezone')
+            opening_hours_ids = client_fields.get('opening_hours', [])
+            
+            if not timezone:
+                logger.warning(f"No timezone configured for client: {client_id}")
+                return None
+            
+            if not opening_hours_ids:
+                logger.warning(f"No opening hours configured for client: {client_id}")
+                return None
+            
+            # Get opening hours records
+            opening_hours_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblOpeningHours')
+            opening_hours_records = []
+            
+            for hours_id in opening_hours_ids:
+                try:
+                    hours_record = opening_hours_table.get(hours_id)
+                    if hours_record:
+                        opening_hours_records.append(hours_record['fields'])
+                except Exception as e:
+                    logger.warning(f"Error getting opening hours record {hours_id}: {e}")
+                    continue
+            
+            return {
+                'timezone': timezone,
+                'opening_hours': opening_hours_records
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting client business hours: {e}")
+            return None
+
+    def _check_business_hours(self, opening_hours: List[Dict[str, Any]], current_weekday: str, current_time_str: str) -> bool:
+        """
+        Check if current time is within business hours
+        
+        Args:
+            opening_hours: List of opening hours records from Airtable
+            current_weekday: Current weekday in lowercase (e.g., 'monday')
+            current_time_str: Current time in HH:MM format (e.g., '14:30')
+        
+        Returns:
+            True if within business hours, False otherwise
+        """
+        try:
+            # Find the opening hours record for the current weekday
+            current_day_hours = None
+            for hours_record in opening_hours:
+                day = hours_record.get('day', '').lower()
+                if day == current_weekday:
+                    current_day_hours = hours_record
+                    break
+            
+            if not current_day_hours:
+                logger.info(f"No opening hours configured for {current_weekday}")
+                return False
+            
+            start_time = current_day_hours.get('start_time', '')
+            end_time = current_day_hours.get('end_time', '')
+            
+            if not start_time or not end_time:
+                logger.warning(f"Incomplete opening hours for {current_weekday}: start={start_time}, end={end_time}")
+                return False
+            
+            logger.info(f"Business hours for {current_weekday}: {start_time} - {end_time}")
+            
+            # Compare times (HH:MM format allows direct string comparison)
+            is_within_hours = start_time <= current_time_str <= end_time
+            
+            logger.info(f"Current time {current_time_str} within hours {start_time}-{end_time}: {is_within_hours}")
+            return is_within_hours
+            
+        except Exception as e:
+            logger.error(f"Error checking business hours: {e}")
+            return False
+
     def process_retell_webhook(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process incoming Retell AI webhook
