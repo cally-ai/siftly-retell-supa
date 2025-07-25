@@ -175,11 +175,23 @@ class WebhookService:
         try:
             # Find the opening hours record for the current weekday
             current_day_hours = None
+            
+            # Handle both scenarios: single record with list of days, or multiple records with individual days
             for hours_record in opening_hours:
-                day = hours_record.get('day', '').lower()
-                if day == current_weekday:
-                    current_day_hours = hours_record
-                    break
+                day_field = hours_record.get('day', '')
+                
+                # If day is a list (single record with multiple days)
+                if isinstance(day_field, list):
+                    days = [str(d).lower() for d in day_field]
+                    if current_weekday in days:
+                        current_day_hours = hours_record
+                        break
+                # If day is a string (individual day record)
+                elif isinstance(day_field, str):
+                    day = day_field.lower()
+                    if day == current_weekday:
+                        current_day_hours = hours_record
+                        break
             
             if not current_day_hours:
                 logger.info(f"No opening hours configured for {current_weekday}")
