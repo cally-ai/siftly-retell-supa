@@ -140,7 +140,7 @@ class WebhookService:
                 return None
             
             client_fields = client_record['fields']
-            timezone = client_fields.get('timezone')
+            timezone = client_fields.get('timezone_text')  # Use the formula field instead of linked field
             opening_hours_ids = client_fields.get('opening_hours', [])
             
             if not timezone:
