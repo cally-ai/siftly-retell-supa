@@ -227,13 +227,14 @@ def assistant_selector():
                 logger.error("No call data in webhook")
                 return jsonify({'error': 'No call data provided'}), 400
             
-            # Extract phone number
-            from_data = call_data.get('from', {})
-            from_number = from_data.get('phoneNumber')
+            # Extract phone number from VAPI call data
+            # VAPI uses call.customer.number instead of call.from.phoneNumber
+            customer_data = call_data.get('customer', {})
+            from_number = customer_data.get('number')
             
             if not from_number:
-                logger.error("No from phone number in call data")
-                return jsonify({'error': 'No from phone number provided'}), 400
+                logger.error("No customer phone number in call data")
+                return jsonify({'error': 'No customer phone number provided'}), 400
             
             logger.info(f"VAPI assistant request for: {from_number}")
             
