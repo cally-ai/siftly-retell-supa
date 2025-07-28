@@ -32,6 +32,7 @@ class Config:
     
     # Retell AI Configuration
     RETELL_WEBHOOK_SECRET = os.getenv('RETELL_WEBHOOK_SECRET')
+    RETELL_API_KEY = os.getenv('RETELL_API_KEY')
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')

@@ -9,6 +9,7 @@ from config import Config, config
 from routes.health_routes import health_bp
 from routes.webhook_routes import webhook_bp
 from routes.airtable_routes import airtable_bp
+from routes.voice_routes import voice_bp
 
 # Version check for debugging
 try:
@@ -53,6 +54,7 @@ def create_app(config_name=None):
     app.register_blueprint(health_bp)
     app.register_blueprint(webhook_bp)
     app.register_blueprint(airtable_bp)
+    app.register_blueprint(voice_bp)
     
     # Error handlers
     @app.errorhandler(404)

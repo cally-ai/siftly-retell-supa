@@ -224,6 +224,31 @@ class AirtableService:
             logger.error(f"Failed to search records in table '{table_name}': {e}")
             return []
     
+    def get_record_from_table(self, table_name: str, record_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a specific record from a table by record ID
+        
+        Args:
+            table_name: Name of the table to get record from
+            record_id: ID of the record to retrieve
+        
+        Returns:
+            Record data if found, None otherwise
+        """
+        if not self.is_configured():
+            logger.error("Airtable service not configured")
+            return None
+        
+        try:
+            # Create a temporary table instance for the specified table
+            temp_table = Table(self.api_key, self.base_id, table_name)
+            record = temp_table.get(record_id)
+            logger.info(f"Retrieved record {record_id} from table '{table_name}'")
+            return record
+        except Exception as e:
+            logger.error(f"Failed to get record {record_id} from table '{table_name}': {e}")
+            return None
+    
     def link_record(self, record_id: str, field_name: str, linked_record_ids: List[str]) -> bool:
         """
         Link records to a field (for linked record fields)
