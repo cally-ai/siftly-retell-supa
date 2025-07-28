@@ -95,7 +95,7 @@ class VoiceWebhookService:
         """
         try:
             response = requests.post(
-                "https://api.retellai.com/v1/call/register-phone-call",
+                "https://api.retellai.com/v1/call/register",
                 json={
                     "agent_id": agent_id,
                     "from_number": from_number,
