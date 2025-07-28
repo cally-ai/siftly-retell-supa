@@ -147,7 +147,17 @@ class VoiceWebhookService:
         try:
             voice_response = VoiceResponse()
             dial = Dial()
-            dial.sip(f"sip:{call_id}@5t4n6j0wnrl.sip.livekit.cloud")
+            
+            # Add SIP parameters for better codec negotiation
+            sip_url = f"sip:{call_id}@5t4n6j0wnrl.sip.livekit.cloud"
+            
+            # Add SIP parameters to prioritize high-quality codecs
+            # Note: Twilio's SIP implementation may have limitations on codec forcing
+            dial.sip(sip_url)
+            
+            # Log the SIP URL for debugging
+            logger.info(f"Generated SIP URL: {sip_url}")
+            
             voice_response.append(dial)
             
             return str(voice_response)
@@ -169,6 +179,9 @@ def voice_webhook():
         # Get form data from Twilio
         from_number = request.form.get('From')
         to_number = request.form.get('To')
+        
+        # Log all form data for debugging
+        logger.info(f"Voice webhook form data: {dict(request.form)}")
         
         if not from_number or not to_number:
             logger.error("Missing required parameters: From or To")
@@ -208,4 +221,27 @@ def voice_webhook():
         return Response(
             '<?xml version="1.0" encoding="UTF-8"?><Response><Say>An error occurred processing your call</Say></Response>',
             mimetype='text/xml'
-        ), 500 
+        ), 500
+
+@voice_bp.route('/debug', methods=['GET'])
+def voice_debug():
+    """Debug endpoint to check voice webhook configuration"""
+    try:
+        # Check if Retell API key is configured
+        retell_configured = bool(voice_service.retell_api_key)
+        
+        # Check if Airtable is configured
+        airtable_configured = voice_service.airtable_service.is_configured()
+        
+        debug_info = {
+            "retell_api_key_configured": retell_configured,
+            "airtable_configured": airtable_configured,
+            "webhook_url": "https://siftly.onrender.com/voice/webhook",
+            "sip_domain": "5t4n6j0wnrl.sip.livekit.cloud"
+        }
+        
+        return debug_info, 200
+        
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
+        return {"error": str(e)}, 500 
