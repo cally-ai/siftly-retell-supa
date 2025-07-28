@@ -214,33 +214,41 @@ def assistant_selector():
         message_type = message.get('type')
         call_data = message.get('call', {})
         
-        if message_type != 'assistant-request':
-            logger.warning(f"Invalid message type: {message_type}")
-            return jsonify({'error': 'Invalid message type'}), 400
-        
-        if not call_data:
-            logger.error("No call data in webhook")
-            return jsonify({'error': 'No call data provided'}), 400
-        
-        # Extract phone number
-        from_data = call_data.get('from', {})
-        from_number = from_data.get('phoneNumber')
-        
-        if not from_number:
-            logger.error("No from phone number in call data")
-            return jsonify({'error': 'No from phone number provided'}), 400
-        
-        logger.info(f"VAPI assistant request for: {from_number}")
-        
-        # Get assistant configuration
-        assistant_config = vapi_service.get_assistant_configuration(from_number)
-        
-        if not assistant_config:
-            logger.warning(f"No assistant configuration found for: {from_number}")
-            return jsonify({'error': 'No assistant configuration found'}), 404
-        
-        logger.info(f"Returning assistant configuration for {from_number}: {assistant_config}")
-        return jsonify(assistant_config), 200
+        # Handle different VAPI message types
+        if message_type == 'assistant-request':
+            # This is the main message we need to handle
+            if not call_data:
+                logger.error("No call data in webhook")
+                return jsonify({'error': 'No call data provided'}), 400
+            
+            # Extract phone number
+            from_data = call_data.get('from', {})
+            from_number = from_data.get('phoneNumber')
+            
+            if not from_number:
+                logger.error("No from phone number in call data")
+                return jsonify({'error': 'No from phone number provided'}), 400
+            
+            logger.info(f"VAPI assistant request for: {from_number}")
+            
+            # Get assistant configuration
+            assistant_config = vapi_service.get_assistant_configuration(from_number)
+            
+            if not assistant_config:
+                logger.warning(f"No assistant configuration found for: {from_number}")
+                return jsonify({'error': 'No assistant configuration found'}), 404
+            
+            logger.info(f"Returning assistant configuration for {from_number}: {assistant_config}")
+            return jsonify(assistant_config), 200
+            
+        elif message_type in ['status-update', 'speech-update', 'conversation-update', 'end-of-call-report']:
+            # These are informational updates - just acknowledge them
+            logger.info(f"Received VAPI {message_type} webhook")
+            return jsonify({'status': 'acknowledged'}), 200
+            
+        else:
+            logger.warning(f"Unknown message type: {message_type}")
+            return jsonify({'error': 'Unknown message type'}), 400
         
     except ValueError as e:
         logger.error(f"Validation error: {e}")
