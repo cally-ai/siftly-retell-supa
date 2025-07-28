@@ -74,6 +74,13 @@ class VoiceWebhookService:
                 logger.warning(f"No agent_id found in client record: {client_record_id}")
                 return None
             
+            # Handle case where agent_id might be a list (linked record)
+            if isinstance(agent_id, list) and len(agent_id) > 0:
+                agent_id = agent_id[0]
+            elif not isinstance(agent_id, str):
+                logger.warning(f"Invalid agent_id format in client record: {client_record_id}")
+                return None
+            
             logger.info(f"Found agent_id: {agent_id} for to_number: {to_number}")
             return agent_id
             
@@ -95,7 +102,7 @@ class VoiceWebhookService:
         """
         try:
             response = requests.post(
-                "https://api.retellai.com/v1/call/register",
+                "https://api.retellai.com/v2/register-phone-call",
                 json={
                     "agent_id": agent_id,
                     "from_number": from_number,
