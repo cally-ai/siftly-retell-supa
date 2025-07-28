@@ -32,11 +32,14 @@ class VAPIWebhookService:
             logger.info(f"Getting assistant configuration for: {from_number}")
             
             # Step 1: Look up the from_number in the caller table
+            logger.info(f"Searching caller table for phone number: {from_number}")
             caller_records = self.airtable_service.search_records_in_table(
                 table_name="tbl3mjOWELyIG2m6o",  # caller table
                 field="phone_number", 
                 value=from_number
             )
+            
+            logger.info(f"Found {len(caller_records)} caller records for {from_number}")
             
             if not caller_records:
                 logger.warning(f"No caller record found for: {from_number}")
@@ -208,6 +211,9 @@ def assistant_selector():
         
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
+        
+        # Log the full webhook payload for debugging
+        logger.info(f"VAPI webhook received - Full payload: {data}")
         
         # Validate the webhook structure
         message = data.get('message', {})
