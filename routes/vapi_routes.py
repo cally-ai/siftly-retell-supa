@@ -366,9 +366,9 @@ def assistant_override_variable_values():
                 logger.warning(f"No dynamic variables found for: {from_number}")
                 return jsonify({'error': 'No dynamic variables found'}), 404
             
-            # Return only the assistantOverrides (no assistantId)
+            # Return only the workflowOverrides (no assistantId)
             response = {
-                "assistantOverrides": {
+                "workflowOverrides": {
                     "variableValues": dynamic_variables
                 }
             }
