@@ -232,18 +232,29 @@ class VAPIWebhookService:
 # Initialize service
 vapi_service = VAPIWebhookService()
 
-@vapi_bp.route('/assistant-selector', methods=['POST'])
-def assistant_selector():
+Ddef assistant_selector():
     """Handle VAPI AI assistant selector webhook"""
     try:
+        # Log comprehensive request information
+        logger.info("=== VAPI ASSISTANT SELECTOR REQUEST DEBUG INFO ===")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(f"Request URL: {request.url}")
+        logger.info(f"Request args: {dict(request.args)}")
+        logger.info(f"Request form data: {dict(request.form)}")
+        logger.info(f"Request content type: {request.content_type}")
+        logger.info(f"Request content length: {request.content_length}")
+        
         # Get the JSON data from the request
         data = request.get_json()
+        logger.info(f"Request JSON data: {data}")
+        logger.info("=== END VAPI ASSISTANT SELECTOR REQUEST DEBUG INFO ===")
         
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
         
         # Log the full webhook payload for debugging
-        logger.info(f"VAPI webhook received - Full payload: {data}")
+        logger.info(f"VAPI assistant selector webhook received - Full payload: {data}")
         
         # Validate the webhook structure
         message = data.get('message', {})
@@ -298,14 +309,26 @@ def assistant_selector():
 def assistant_override_variable_values():
     """Handle VAPI AI assistant override variable values webhook"""
     try:
+        # Log comprehensive request information
+        logger.info("=== VAPI ASSISTANT OVERRIDE REQUEST DEBUG INFO ===")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(f"Request URL: {request.url}")
+        logger.info(f"Request args: {dict(request.args)}")
+        logger.info(f"Request form data: {dict(request.form)}")
+        logger.info(f"Request content type: {request.content_type}")
+        logger.info(f"Request content length: {request.content_length}")
+        
         # Get the JSON data from the request
         data = request.get_json()
+        logger.info(f"Request JSON data: {data}")
+        logger.info("=== END VAPI ASSISTANT OVERRIDE REQUEST DEBUG INFO ===")
         
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
         
         # Log the full webhook payload for debugging
-        logger.info(f"VAPI override webhook received - Full payload: {data}")
+        logger.info(f"VAPI assistant override webhook received - Full payload: {data}")
         
         # Validate the webhook structure
         message = data.get('message', {})
@@ -313,7 +336,13 @@ def assistant_override_variable_values():
         call_data = message.get('call', {})
         
         # Handle different VAPI message types
-        if message_type == 'assistant-request':
+        if message_type == 'status-update':
+            # Only process when status is "in-progress"
+            status = message.get('status')
+            if status != 'in-progress':
+                logger.info(f"Status update received but not 'in-progress': {status}")
+                return jsonify({'status': 'acknowledged'}), 200
+            
             # This is the main message we need to handle
             if not call_data:
                 logger.error("No call data in webhook")
@@ -328,7 +357,7 @@ def assistant_override_variable_values():
                 logger.error("No customer phone number in call data")
                 return jsonify({'error': 'No customer phone number provided'}), 400
             
-            logger.info(f"VAPI override request for: {from_number}")
+            logger.info(f"VAPI override request for: {from_number} (status: in-progress)")
             
             # Get dynamic variables only (no assistant lookup needed)
             dynamic_variables = vapi_service._get_dynamic_variables_for_caller(from_number)
