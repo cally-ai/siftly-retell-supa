@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 from config import Config
 from services.airtable_service import AirtableService
 from utils.logger import get_logger
+import json
 
 logger = get_logger(__name__)
 
@@ -376,3 +377,87 @@ def vapi_debug():
     except Exception as e:
         logger.error(f"Error in VAPI debug endpoint: {e}")
         return {"error": str(e)}, 500 
+
+@vapi_bp.route('/get-client-dynamic-variables', methods=['POST'])
+def get_client_dynamic_variables():
+    """Get dynamic variables for a client based on phone number"""
+    try:
+        data = request.get_json()
+        logger.info(f"VAPI get-client-dynamic-variables webhook received - Full payload: {data}")
+        
+        # Extract toolCallId from the VAPI tool call format
+        tool_call_id = None
+        if 'message' in data and 'toolCallList' in data['message']:
+            tool_call_list = data['message']['toolCallList']
+            if tool_call_list and len(tool_call_list) > 0:
+                tool_call_id = tool_call_list[0].get('id')
+        
+        if not tool_call_id:
+            logger.error("No toolCallId found in request data")
+            return jsonify({
+                "results": [{
+                    "toolCallId": "unknown",
+                    "result": "Error: No toolCallId provided"
+                }]
+            }), 400
+        
+        # Extract phone number from the request
+        # VAPI AI might send it in different formats, so we'll check multiple possible locations
+        from_number = None
+        
+        # Check if it's in the message data
+        if 'message' in data and 'call' in data['message']:
+            call_data = data['message']['call']
+            if 'customer' in call_data and 'number' in call_data['customer']:
+                from_number = call_data['customer']['number']
+        
+        # Check if it's in the variables
+        if not from_number and 'message' in data and 'variables' in data['message']:
+            variables = data['message']['variables']
+            if 'customer' in variables and 'number' in variables['customer']:
+                from_number = variables['customer']['number']
+        
+        # Check if it's directly in the payload
+        if not from_number and 'from_number' in data:
+            from_number = data['from_number']
+        
+        if not from_number:
+            logger.error("No from phone number found in request data")
+            return jsonify({
+                "results": [{
+                    "toolCallId": tool_call_id,
+                    "result": "Error: No from_number provided"
+                }]
+            }), 400
+        
+        logger.info(f"Looking up dynamic variables for: {from_number}")
+        
+        # Get dynamic variables using the same logic as the override endpoint
+        vapi_service = VAPIWebhookService()
+        dynamic_variables = vapi_service._get_dynamic_variables_for_caller(from_number)
+        
+        if dynamic_variables:
+            logger.info(f"Dynamic variables found for {from_number}: {dynamic_variables}")
+            return jsonify({
+                "results": [{
+                    "toolCallId": tool_call_id,
+                    "result": json.dumps(dynamic_variables)
+                }]
+            }), 200
+        else:
+            logger.warning(f"No dynamic variables found for {from_number}")
+            return jsonify({
+                "results": [{
+                    "toolCallId": tool_call_id,
+                    "result": "Error: No dynamic variables found"
+                }]
+            }), 404
+            
+    except Exception as e:
+        logger.error(f"Error in get-client-dynamic-variables: {e}")
+        return jsonify({
+            "results": [{
+                "toolCallId": tool_call_id if 'tool_call_id' in locals() else "unknown",
+                "result": f"Error: {str(e)}"
+            }]
+        }), 500 
