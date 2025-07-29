@@ -141,7 +141,7 @@ class VAPIWebhookService:
     def _get_customer_data_by_phone(self, phone_number: str) -> Optional[Dict[str, Any]]:
         """
         Get customer data from Airtable based on phone number
-        (Similar to the Retell inbound logic)
+        (Follows the same pattern as Retell inbound logic)
         
         Args:
             phone_number: The phone number to look up
@@ -181,16 +181,45 @@ class VAPIWebhookService:
                 logger.warning(f"Client record not found: {client_record_id}")
                 return None
             
-            # Step 3: Extract dynamic variables from client record
-            # This follows the same pattern as the Retell inbound webhook
-            dynamic_variables = {}
+            # Step 3: Get dynamic variables from client_dynamic_variables table (same as Retell)
             client_fields = client_record.get('fields', {})
+            dynamic_variables = {}
             
-            # Add client-specific dynamic variables
-            excluded_fields = ['name', 'client_dynamic_variables_id', 'client', 'agent_id']
-            for field_name, field_value in client_fields.items():
-                if field_name not in excluded_fields:
-                    dynamic_variables[field_name] = field_value
+            # Get dynamic_variables record ID from client
+            dynamic_variables_record_id = client_fields.get('dynamic_variables', [None])[0] if client_fields.get('dynamic_variables') else None
+            
+            if dynamic_variables_record_id:
+                # Get dynamic variables record
+                dynamic_record = self.airtable_service.get_record_from_table(
+                    table_name="client_dynamic_variables",
+                    record_id=dynamic_variables_record_id
+                )
+                
+                if dynamic_record:
+                    # Extract fields from dynamic_variables table
+                    dynamic_fields = dynamic_record.get('fields', {})
+                    excluded_fields = ['name', 'client_dynamic_variables_id', 'client']
+                    for field_name, field_value in dynamic_fields.items():
+                        if field_name not in excluded_fields:
+                            dynamic_variables[field_name] = field_value
+            
+            # Step 4: Get language agent names from language_agent_names table (same as Retell)
+            language_agent_names = client_fields.get('language_agent_names', [])
+            
+            for linked_record_id in language_agent_names:
+                language_record = self.airtable_service.get_record_from_table(
+                    table_name="language_agent_names",
+                    record_id=linked_record_id
+                )
+                
+                if language_record:
+                    key_pair_value = language_record.get('fields', {}).get('key_pair', '')
+                    if key_pair_value and '=' in key_pair_value:
+                        parts = key_pair_value.split('=', 1)
+                        if len(parts) == 2:
+                            key = parts[0].strip()
+                            value = parts[1].strip()
+                            dynamic_variables[key] = value
             
             logger.info(f"Found dynamic variables for {phone_number}: {dynamic_variables}")
             return dynamic_variables
