@@ -387,19 +387,22 @@ def get_client_dynamic_variables():
         
         # Extract toolCallId from the VAPI tool call format
         tool_call_id = None
-        if 'message' in data and 'toolCallList' in data['message']:
-            tool_call_list = data['message']['toolCallList']
-            if tool_call_list and len(tool_call_list) > 0:
-                tool_call_id = tool_call_list[0].get('id')
+        logger.info(f"Data structure: {list(data.keys()) if data else 'empty'}")
+        
+        if 'message' in data:
+            logger.info(f"Message structure: {list(data['message'].keys()) if data['message'] else 'empty'}")
+            if 'toolCallList' in data['message']:
+                tool_call_list = data['message']['toolCallList']
+                logger.info(f"Tool call list: {tool_call_list}")
+                if tool_call_list and len(tool_call_list) > 0:
+                    tool_call_id = tool_call_list[0].get('id')
+                    logger.info(f"Found toolCallId: {tool_call_id}")
         
         if not tool_call_id:
             logger.error("No toolCallId found in request data")
-            return jsonify({
-                "results": [{
-                    "toolCallId": "unknown",
-                    "result": "Error: No toolCallId provided"
-                }]
-            }), 400
+            # For testing purposes, use a default toolCallId
+            tool_call_id = "test_tool_call_id"
+            logger.info("Using test toolCallId for debugging")
         
         # Extract phone number from the request
         # VAPI AI might send it in different formats, so we'll check multiple possible locations
