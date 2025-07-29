@@ -232,7 +232,7 @@ class VAPIWebhookService:
 # Initialize service
 vapi_service = VAPIWebhookService()
 
-Ddef assistant_selector():
+def assistant_selector():
     """Handle VAPI AI assistant selector webhook"""
     try:
         # Log comprehensive request information
