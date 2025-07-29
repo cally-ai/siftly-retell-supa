@@ -208,7 +208,7 @@ class VAPIWebhookService:
             
             for linked_record_id in language_agent_names:
                 language_record = self.airtable_service.get_record_from_table(
-                    table_name="language_agent_names",
+                    table_name="tblT79Xju3vLxNipr",  # Use the same table ID as Retell
                     record_id=linked_record_id
                 )
                 
