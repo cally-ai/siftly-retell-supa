@@ -382,8 +382,30 @@ def vapi_debug():
 def get_client_dynamic_variables():
     """Get dynamic variables for a client based on phone number"""
     try:
+        # Log comprehensive request information
+        logger.info("=== VAPI REQUEST DEBUG INFO ===")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(f"Request URL: {request.url}")
+        logger.info(f"Request args: {dict(request.args)}")
+        logger.info(f"Request form data: {dict(request.form)}")
+        logger.info(f"Request content type: {request.content_type}")
+        logger.info(f"Request content length: {request.content_length}")
+        
         data = request.get_json()
-        logger.info(f"VAPI get-client-dynamic-variables webhook received - Full payload: {data}")
+        logger.info(f"Request JSON data: {data}")
+        logger.info("=== END VAPI REQUEST DEBUG INFO ===")
+        
+        if not data:
+            logger.warning("No JSON data received - checking if it's a form request")
+            # Check if data is in form format instead
+            form_data = dict(request.form)
+            if form_data:
+                logger.info(f"Found form data: {form_data}")
+                data = form_data
+            else:
+                logger.error("No JSON data or form data received")
+                return jsonify({'error': 'No data received'}), 400
         
         # Extract toolCallId from the VAPI tool call format
         tool_call_id = None
