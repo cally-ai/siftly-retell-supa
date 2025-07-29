@@ -293,6 +293,71 @@ def assistant_selector():
         logger.error(f"Error processing VAPI webhook: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@vapi_bp.route('/assistant-override-variable-values', methods=['POST'])
+def assistant_override_variable_values():
+    """Handle VAPI AI assistant override variable values webhook"""
+    try:
+        # Get the JSON data from the request
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No JSON data received'}), 400
+        
+        # Log the full webhook payload for debugging
+        logger.info(f"VAPI override webhook received - Full payload: {data}")
+        
+        # Validate the webhook structure
+        message = data.get('message', {})
+        message_type = message.get('type')
+        call_data = message.get('call', {})
+        
+        # Handle different VAPI message types
+        if message_type == 'assistant-request':
+            # This is the main message we need to handle
+            if not call_data:
+                logger.error("No call data in webhook")
+                return jsonify({'error': 'No call data provided'}), 400
+            
+            # Extract phone number from VAPI call data
+            # VAPI uses call.customer.number instead of call.from.phoneNumber
+            customer_data = call_data.get('customer', {})
+            from_number = customer_data.get('number')
+            
+            if not from_number:
+                logger.error("No customer phone number in call data")
+                return jsonify({'error': 'No customer phone number provided'}), 400
+            
+            logger.info(f"VAPI override request for: {from_number}")
+            
+            # Get dynamic variables only (no assistant lookup needed)
+            dynamic_variables = vapi_service._get_dynamic_variables_for_caller(from_number)
+            
+            if not dynamic_variables:
+                logger.warning(f"No dynamic variables found for: {from_number}")
+                return jsonify({'error': 'No dynamic variables found'}), 404
+            
+            # Return only the assistantOverrides (no assistantId)
+            response = {
+                "assistantOverrides": {
+                    "variableValues": dynamic_variables
+                }
+            }
+            
+            logger.info(f"Returning override variables for {from_number}: {response}")
+            return jsonify(response), 200
+            
+        elif message_type in ['status-update', 'speech-update', 'conversation-update', 'end-of-call-report']:
+            # Acknowledge other message types
+            logger.info(f"Received VAPI {message_type} webhook")
+            return jsonify({'status': 'acknowledged'}), 200
+        else:
+            logger.warning(f"Invalid message type: {message_type}")
+            return jsonify({'error': 'Invalid message type'}), 400
+            
+    except Exception as e:
+        logger.error(f"Error processing VAPI override webhook: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
 @vapi_bp.route('/debug', methods=['GET'])
 def vapi_debug():
     """Debug endpoint to check VAPI webhook configuration"""
