@@ -539,7 +539,7 @@ def vapi_new_incoming_call_event():
         # Log the full webhook payload for debugging
         logger.info(f"VAPI new incoming call event webhook - Full payload: {data}")
         
-        # Extract call_id from the webhook payload
+        # Extract call_id and other data from the webhook payload
         message = data.get('message', {})
         call_id = message.get('call', {}).get('id')
         
@@ -548,6 +548,12 @@ def vapi_new_incoming_call_event():
             return jsonify({'error': 'No call_id found in payload'}), 400
         
         logger.info(f"Processing call_id: {call_id}")
+        
+        # Extract from_number and vapi_workflow_number from webhook payload
+        from_number = message.get('customer', {}).get('number', '')
+        vapi_workflow_number = message.get('phoneNumber', {}).get('number', '')
+        
+        logger.info(f"From webhook payload - from_number: {from_number}, vapi_workflow_number: {vapi_workflow_number}")
         
         # Retrieve detailed call data from VAPI API
         vapi_service = VAPIWebhookService()
@@ -562,7 +568,7 @@ def vapi_new_incoming_call_event():
         
         # Save detailed call data to Airtable
         try:
-            # Prepare fields for Airtable using the extracted call data
+            # Prepare fields for Airtable using the extracted call data and webhook payload
             airtable_fields = {
                 'call_id': call_data.get('id', ''),
                 'phoneNumberId': call_data.get('phoneNumberId', ''),
@@ -576,8 +582,8 @@ def vapi_new_incoming_call_event():
                 'status': call_data.get('status', ''),
                 'cost': call_data.get('cost', 0),
                 'workflowId': call_data.get('workflowId', ''),
-                'from_number': call_data.get('from_number', ''),
-                'vapi_language_workflow_number': call_data.get('vapi_workflow_number', ''),
+                'from_number': from_number,  # From webhook payload
+                'vapi_language_workflow_number': vapi_workflow_number,  # From webhook payload
                 'analysis_summary': call_data.get('analysis_summary', ''),
                 'analysis_succes_evaluation': call_data.get('analysis_succes_evaluation', '')
             }
