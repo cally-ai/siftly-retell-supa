@@ -31,24 +31,18 @@ class VAPIWebhookService:
             Assistant configuration with dynamic variables or None if not found
         """
         try:
-            logger.info(f"Getting assistant configuration for: {from_number}")
-            
             # Step 1: Look up the from_number in the caller table
-            logger.info(f"Searching caller table for phone number: {from_number}")
             caller_records = self.airtable_service.search_records_in_table(
                 table_name="tbl3mjOWELyIG2m6o",  # caller table
                 field="phone_number", 
                 value=from_number
             )
             
-            logger.info(f"Found {len(caller_records)} caller records for {from_number}")
-            
             if not caller_records:
                 logger.warning(f"No caller record found for: {from_number}")
                 return None
             
             caller_record = caller_records[0]
-            logger.info(f"Found caller record: {caller_record.get('id')}")
             
             # Step 2: Get the linked language record
             language_linked_ids = caller_record.get('fields', {}).get('language', [])
@@ -151,8 +145,6 @@ class VAPIWebhookService:
             Customer data dictionary or None if not found
         """
         try:
-            logger.info(f"Getting customer data for phone number: {phone_number}")
-            
             # Search in the twilio_number table for the phone number
             twilio_records = self.airtable_service.search_records_in_table(
                 table_name="tbl0PeZoX2qgl74ZT",  # twilio_number table
@@ -165,7 +157,6 @@ class VAPIWebhookService:
                 return None
             
             twilio_record = twilio_records[0]
-            logger.info(f"Found twilio_number record: {twilio_record.get('id')}")
             
             # Get the linked client record
             client_linked_ids = twilio_record.get('fields', {}).get('client', [])
@@ -296,26 +287,11 @@ vapi_service = VAPIWebhookService()
 def assistant_selector():
     """Handle VAPI AI assistant selector webhook"""
     try:
-        # Log comprehensive request information
-        logger.info("=== VAPI ASSISTANT SELECTOR REQUEST DEBUG INFO ===")
-        logger.info(f"Request method: {request.method}")
-        logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Request URL: {request.url}")
-        logger.info(f"Request args: {dict(request.args)}")
-        logger.info(f"Request form data: {dict(request.form)}")
-        logger.info(f"Request content type: {request.content_type}")
-        logger.info(f"Request content length: {request.content_length}")
-        
         # Get the JSON data from the request
         data = request.get_json()
-        logger.info(f"Request JSON data: {data}")
-        logger.info("=== END VAPI ASSISTANT SELECTOR REQUEST DEBUG INFO ===")
         
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
-        
-        # Log the full webhook payload for debugging
-        logger.info(f"VAPI assistant selector webhook received - Full payload: {data}")
         
         # Validate the webhook structure
         message = data.get('message', {})
@@ -347,7 +323,7 @@ def assistant_selector():
                 logger.warning(f"No assistant configuration found for: {from_number}")
                 return jsonify({'error': 'No assistant configuration found'}), 404
             
-            logger.info(f"Returning assistant configuration for {from_number}: {assistant_config}")
+            logger.info(f"Returning assistant configuration for {from_number}")
             return jsonify(assistant_config), 200
             
         elif message_type in ['status-update', 'speech-update', 'conversation-update', 'end-of-call-report']:
@@ -381,19 +357,9 @@ def assistant_override_variable_values():
         message_type = message.get('type')
         call_data = message.get('call', {})
         
-        # Skip ALL logging for conversation-update messages to reduce log bloat
-        if message_type != 'conversation-update':
-            # Log comprehensive request information (but not for conversation-update)
-            logger.info("=== VAPI ASSISTANT OVERRIDE REQUEST DEBUG INFO ===")
-            logger.info(f"Request method: {request.method}")
-            logger.info(f"Request headers: {dict(request.headers)}")
-            logger.info(f"Request URL: {request.url}")
-            logger.info(f"Request args: {dict(request.args)}")
-            logger.info(f"Request form data: {dict(request.form)}")
-            logger.info(f"Request content type: {request.content_type}")
-            logger.info(f"Request content length: {request.content_length}")
-            logger.info(f"Request JSON data: {data}")
-            logger.info("=== END VAPI ASSISTANT OVERRIDE REQUEST DEBUG INFO ===")
+        # Skip logging for conversation-update messages to reduce log bloat
+        if message_type == 'conversation-update':
+            return jsonify({'status': 'acknowledged'}), 200
         
         # Handle different VAPI message types
         if message_type == 'status-update':
@@ -433,13 +399,12 @@ def assistant_override_variable_values():
                 }
             }
             
-            logger.info(f"Returning override variables for {from_number}: {response}")
+            logger.info(f"Returning override variables for {from_number}")
             return jsonify(response), 200
             
-        elif message_type in ['status-update', 'speech-update', 'conversation-update', 'end-of-call-report']:
+        elif message_type in ['status-update', 'speech-update', 'end-of-call-report']:
             # Acknowledge other message types
-            if message_type != 'conversation-update':
-                logger.info(f"Received VAPI {message_type} webhook")
+            logger.info(f"Received VAPI {message_type} webhook")
             return jsonify({'status': 'acknowledged'}), 200
         else:
             logger.warning(f"Invalid message type: {message_type}")
@@ -472,19 +437,7 @@ def vapi_debug():
 def get_client_dynamic_variables():
     """Get dynamic variables for a client based on phone number"""
     try:
-        # Log comprehensive request information
-        logger.info("=== VAPI REQUEST DEBUG INFO ===")
-        logger.info(f"Request method: {request.method}")
-        logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Request URL: {request.url}")
-        logger.info(f"Request args: {dict(request.args)}")
-        logger.info(f"Request form data: {dict(request.form)}")
-        logger.info(f"Request content type: {request.content_type}")
-        logger.info(f"Request content length: {request.content_length}")
-        
         data = request.get_json()
-        logger.info(f"Request JSON data: {data}")
-        logger.info("=== END VAPI REQUEST DEBUG INFO ===")
         
         if not data:
             logger.warning("No JSON data received - checking if it's a form request")
@@ -499,23 +452,17 @@ def get_client_dynamic_variables():
         
         # Extract toolCallId from the VAPI tool call format
         tool_call_id = None
-        logger.info(f"Data structure: {list(data.keys()) if data else 'empty'}")
         
         # Check for function tool format (has message.toolCallList)
         if 'message' in data:
-            logger.info(f"Message structure: {list(data['message'].keys()) if data['message'] else 'empty'}")
             if 'toolCallList' in data['message']:
                 tool_call_list = data['message']['toolCallList']
-                logger.info(f"Tool call list: {tool_call_list}")
                 if tool_call_list and len(tool_call_list) > 0:
                     tool_call_id = tool_call_list[0].get('id')
-                    logger.info(f"Found toolCallId: {tool_call_id}")
         
         # Check for API Request format (no toolCallId, just direct data)
         if not tool_call_id:
-            logger.info("No toolCallId found - likely API Request format")
             tool_call_id = "api_request_tool_call_id"
-            logger.info("Using API Request toolCallId")
         
         # Extract phone number from the request
         # VAPI AI might send it in different formats, so we'll check multiple possible locations
@@ -553,7 +500,7 @@ def get_client_dynamic_variables():
         dynamic_variables = vapi_service._get_dynamic_variables_for_caller(from_number)
         
         if dynamic_variables:
-            logger.info(f"Dynamic variables found for {from_number}: {dynamic_variables}")
+            logger.info(f"Dynamic variables found for {from_number}")
             return jsonify({
                 "results": [{
                     "toolCallId": tool_call_id,
@@ -582,27 +529,12 @@ def get_client_dynamic_variables():
 def vapi_new_incoming_call_event():
     """Handle VAPI AI new incoming call event webhook"""
     try:
-        # Log comprehensive request information
-        logger.info("=== VAPI NEW INCOMING CALL EVENT REQUEST DEBUG INFO ===")
-        logger.info(f"Request method: {request.method}")
-        logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Request URL: {request.url}")
-        logger.info(f"Request args: {dict(request.args)}")
-        logger.info(f"Request form data: {dict(request.form)}")
-        logger.info(f"Request content type: {request.content_type}")
-        logger.info(f"Request content length: {request.content_length}")
-        
         # Get the JSON data from the request
         data = request.get_json()
-        logger.info(f"Request JSON data: {data}")
-        logger.info("=== END VAPI NEW INCOMING CALL EVENT REQUEST DEBUG INFO ===")
         
         if not data:
             logger.warning("No JSON data received for new incoming call event")
             return jsonify({'error': 'No JSON data received'}), 400
-        
-        # Log the full webhook payload for debugging
-        logger.info(f"VAPI new incoming call event webhook received - Full payload: {data}")
         
         # Extract call_id from the webhook payload
         message = data.get('message', {})
