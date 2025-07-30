@@ -327,13 +327,15 @@ def assistant_override_variable_values():
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
         
-        # Log the full webhook payload for debugging
-        logger.info(f"VAPI assistant override webhook received - Full payload: {data}")
-        
         # Validate the webhook structure
         message = data.get('message', {})
         message_type = message.get('type')
         call_data = message.get('call', {})
+        
+        # Skip logging for conversation-update messages to reduce log bloat
+        if message_type != 'conversation-update':
+            # Log the full webhook payload for debugging (but not for conversation-update)
+            logger.info(f"VAPI assistant override webhook received - Full payload: {data}")
         
         # Handle different VAPI message types
         if message_type == 'status-update':
@@ -378,7 +380,8 @@ def assistant_override_variable_values():
             
         elif message_type in ['status-update', 'speech-update', 'conversation-update', 'end-of-call-report']:
             # Acknowledge other message types
-            logger.info(f"Received VAPI {message_type} webhook")
+            if message_type != 'conversation-update':
+                logger.info(f"Received VAPI {message_type} webhook")
             return jsonify({'status': 'acknowledged'}), 200
         else:
             logger.warning(f"Invalid message type: {message_type}")
