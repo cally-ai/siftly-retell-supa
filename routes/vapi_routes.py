@@ -7,6 +7,7 @@ from config import Config
 from services.airtable_service import AirtableService
 from utils.logger import get_logger
 import json
+import requests
 
 logger = get_logger(__name__)
 
@@ -141,31 +142,32 @@ class VAPIWebhookService:
     
     def _get_customer_data_by_phone(self, phone_number: str) -> Optional[Dict[str, Any]]:
         """
-        Get customer data from Airtable based on phone number
-        (Follows the same pattern as Retell inbound logic)
+        Get customer data by phone number from Airtable
         
         Args:
-            phone_number: The phone number to look up
+            phone_number: The customer's phone number
             
         Returns:
             Customer data dictionary or None if not found
         """
         try:
-            # Step 1: Find the phone number in twilio_number table
+            logger.info(f"Getting customer data for phone number: {phone_number}")
+            
+            # Search in the twilio_number table for the phone number
             twilio_records = self.airtable_service.search_records_in_table(
-                table_name="twilio_number",
+                table_name="tbl0PeZoX2qgl74ZT",  # twilio_number table
                 field="twilio_number", 
                 value=phone_number
             )
             
             if not twilio_records:
-                logger.info(f"No twilio_number record found for: {phone_number}")
+                logger.warning(f"No twilio_number record found for: {phone_number}")
                 return None
             
             twilio_record = twilio_records[0]
             logger.info(f"Found twilio_number record: {twilio_record.get('id')}")
             
-            # Step 2: Get the linked client record
+            # Get the linked client record
             client_linked_ids = twilio_record.get('fields', {}).get('client', [])
             if not client_linked_ids:
                 logger.warning(f"No client linked to twilio_number: {phone_number}")
@@ -182,51 +184,110 @@ class VAPIWebhookService:
                 logger.warning(f"Client record not found: {client_record_id}")
                 return None
             
-            # Step 3: Get dynamic variables from client_dynamic_variables table (same as Retell)
-            client_fields = client_record.get('fields', {})
-            dynamic_variables = {}
+            # Get client dynamic variables
+            client_dynamic_variables = {}
+            client_dynamic_variables_linked_ids = client_record.get('fields', {}).get('client_dynamic_variables', [])
             
-            # Get dynamic_variables record ID from client
-            dynamic_variables_record_id = client_fields.get('dynamic_variables', [None])[0] if client_fields.get('dynamic_variables') else None
+            if client_dynamic_variables_linked_ids:
+                for var_id in client_dynamic_variables_linked_ids:
+                    var_record = self.airtable_service.get_record_from_table(
+                        table_name="client_dynamic_variables",
+                        record_id=var_id
+                    )
+                    if var_record:
+                        var_name = var_record.get('fields', {}).get('variable_name')
+                        var_value = var_record.get('fields', {}).get('variable_value')
+                        if var_name and var_value:
+                            client_dynamic_variables[var_name] = var_value
             
-            if dynamic_variables_record_id:
-                # Get dynamic variables record
-                dynamic_record = self.airtable_service.get_record_from_table(
-                    table_name="client_dynamic_variables",
-                    record_id=dynamic_variables_record_id
-                )
-                
-                if dynamic_record:
-                    # Extract fields from dynamic_variables table
-                    dynamic_fields = dynamic_record.get('fields', {})
-                    excluded_fields = ['name', 'client_dynamic_variables_id', 'client']
-                    for field_name, field_value in dynamic_fields.items():
-                        if field_name not in excluded_fields:
-                            dynamic_variables[field_name] = field_value
+            # Get language agent names
+            language_agent_names = {}
+            language_agent_names_linked_ids = client_record.get('fields', {}).get('language_agent_names', [])
             
-            # Step 4: Get language agent names from language_agent_names table (same as Retell)
-            language_agent_names = client_fields.get('language_agent_names', [])
+            if language_agent_names_linked_ids:
+                for lang_id in language_agent_names_linked_ids:
+                    lang_record = self.airtable_service.get_record_from_table(
+                        table_name="tblT79Xju3vLxNipr",  # language_agent_names table
+                        record_id=lang_id
+                    )
+                    if lang_record:
+                        lang_name = lang_record.get('fields', {}).get('language_name')
+                        agent_name = lang_record.get('fields', {}).get('agent_name')
+                        if lang_name and agent_name:
+                            language_agent_names[lang_name] = agent_name
             
-            for linked_record_id in language_agent_names:
-                language_record = self.airtable_service.get_record_from_table(
-                    table_name="tblT79Xju3vLxNipr",  # Use the same table ID as Retell
-                    record_id=linked_record_id
-                )
-                
-                if language_record:
-                    key_pair_value = language_record.get('fields', {}).get('key_pair', '')
-                    if key_pair_value and '=' in key_pair_value:
-                        parts = key_pair_value.split('=', 1)
-                        if len(parts) == 2:
-                            key = parts[0].strip()
-                            value = parts[1].strip()
-                            dynamic_variables[key] = value
+            # Combine all dynamic variables
+            all_dynamic_variables = {**client_dynamic_variables, **language_agent_names}
             
-            logger.info(f"Found dynamic variables for {phone_number}: {dynamic_variables}")
-            return dynamic_variables
+            logger.info(f"Found {len(all_dynamic_variables)} dynamic variables for {phone_number}")
+            return all_dynamic_variables
             
         except Exception as e:
             logger.error(f"Error getting customer data for {phone_number}: {e}")
+            return None
+
+    def get_vapi_call_data(self, call_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve call data from VAPI API using the call ID
+        
+        Args:
+            call_id: The VAPI call ID
+            
+        Returns:
+            Extracted call data dictionary or None if failed
+        """
+        try:
+            logger.info(f"Retrieving VAPI call data for call_id: {call_id}")
+            
+            if not Config.VAPI_API_KEY:
+                logger.error("VAPI_API_KEY not configured")
+                return None
+            
+            # Make API call to VAPI
+            url = f"https://api.vapi.ai/call?id={call_id}"
+            headers = {
+                "Authorization": Config.VAPI_API_KEY
+            }
+            
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code != 200:
+                logger.error(f"VAPI API call failed with status {response.status_code}: {response.text}")
+                return None
+            
+            call_data = response.json()
+            
+            if not call_data or not isinstance(call_data, list) or len(call_data) == 0:
+                logger.warning(f"No call data found for call_id: {call_id}")
+                return None
+            
+            call_info = call_data[0]  # Get the first (and should be only) call record
+            
+            # Extract the required fields
+            extracted_data = {
+                'id': call_info.get('id', ''),
+                'phoneNumberId': call_info.get('phoneNumberId', ''),
+                'type': call_info.get('type', ''),
+                'startedAt': call_info.get('startedAt', ''),
+                'endedAt': call_info.get('endedAt', ''),
+                'transcript': call_info.get('transcript', ''),
+                'recordingUrl': call_info.get('recordingUrl', ''),
+                'summary': call_info.get('summary', ''),
+                'orgId': call_info.get('orgId', ''),
+                'status': call_info.get('status', ''),
+                'cost': call_info.get('cost', 0),
+                'workflowId': call_info.get('workflowId', ''),
+                'from_number': call_info.get('variableValues', {}).get('customer', {}).get('number', ''),
+                'vapi_workflow_number': call_info.get('variableValues', {}).get('phoneNumber', {}).get('number', ''),
+                'analysis_summary': call_info.get('analysis', {}).get('summary', ''),
+                'analysis_succes_evaluation': call_info.get('analysis', {}).get('successEvaluation', '')
+            }
+            
+            logger.info(f"Successfully extracted VAPI call data for call_id: {call_id}")
+            return extracted_data
+            
+        except Exception as e:
+            logger.error(f"Error retrieving VAPI call data for {call_id}: {e}")
             return None
 
 # Initialize service
@@ -543,45 +604,64 @@ def vapi_new_incoming_call_event():
         # Log the full webhook payload for debugging
         logger.info(f"VAPI new incoming call event webhook received - Full payload: {data}")
         
-        # Save webhook event to Airtable
+        # Extract call_id from the webhook payload
+        message = data.get('message', {})
+        call_id = message.get('call', {}).get('id')
+        
+        if not call_id:
+            logger.warning("No call_id found in webhook payload")
+            return jsonify({'error': 'No call_id found in payload'}), 400
+        
+        logger.info(f"Processing call_id: {call_id}")
+        
+        # Retrieve detailed call data from VAPI API
+        vapi_service = VAPIWebhookService()
+        call_data = vapi_service.get_vapi_call_data(call_id)
+        
+        if not call_data:
+            logger.warning(f"Failed to retrieve call data for call_id: {call_id}")
+            return jsonify({'error': 'Failed to retrieve call data'}), 500
+        
+        # Save detailed call data to Airtable
         try:
-            # Extract key information from the webhook payload
-            message = data.get('message', {})
-            call_data = data.get('call', {})
-            
-            # Prepare fields for Airtable
+            # Prepare fields for Airtable using the extracted call data
             airtable_fields = {
-                'webhook_payload': str(data),  # Store full payload as string
-                'message_type': message.get('type', 'unknown'),
-                'timestamp': message.get('timestamp'),
-                'call_id': call_data.get('id'),
-                'call_status': call_data.get('status'),
-                'call_type': call_data.get('type'),
-                'customer_number': call_data.get('customer', {}).get('number'),
-                'phone_number': call_data.get('phoneNumber', {}).get('number'),
-                'workflow_id': call_data.get('workflowId'),
-                'created_at': call_data.get('createdAt'),
-                'updated_at': call_data.get('updatedAt')
+                'id': call_data.get('id', ''),
+                'phoneNumberId': call_data.get('phoneNumberId', ''),
+                'type': call_data.get('type', ''),
+                'startedAt': call_data.get('startedAt', ''),
+                'endedAt': call_data.get('endedAt', ''),
+                'transcript': call_data.get('transcript', ''),
+                'recordingUrl': call_data.get('recordingUrl', ''),
+                'summary': call_data.get('summary', ''),
+                'orgId': call_data.get('orgId', ''),
+                'status': call_data.get('status', ''),
+                'cost': call_data.get('cost', 0),
+                'workflowId': call_data.get('workflowId', ''),
+                'from_number': call_data.get('from_number', ''),
+                'vapi_workflow_number': call_data.get('vapi_workflow_number', ''),
+                'analysis_summary': call_data.get('analysis_summary', ''),
+                'analysis_succes_evaluation': call_data.get('analysis_succes_evaluation', '')
             }
             
             # Save to Airtable
             record = vapi_service.airtable_service.create_record(
-                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                fields=airtable_fields
+                Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                airtable_fields
             )
             
             if record:
-                logger.info(f"Successfully saved webhook event to Airtable: {record.get('id')}")
+                logger.info(f"Successfully saved detailed call data to Airtable: {record.get('id')}")
             else:
-                logger.warning("Failed to save webhook event to Airtable")
+                logger.warning("Failed to save detailed call data to Airtable")
                 
         except Exception as e:
-            logger.error(f"Error saving webhook event to Airtable: {e}")
+            logger.error(f"Error saving detailed call data to Airtable: {e}")
             # Continue processing even if Airtable save fails
         
         # Acknowledge the webhook with a success response
         logger.info("Successfully processed new incoming call event webhook")
-        return jsonify({'status': 'success', 'message': 'New incoming call event received'}), 200
+        return jsonify({'status': 'success', 'message': 'New incoming call event received and processed'}), 200
         
     except Exception as e:
         logger.error(f"Error processing VAPI new incoming call event webhook: {e}")

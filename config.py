@@ -15,6 +15,7 @@ print(f"AIRTABLE_BASE_ID: {os.getenv('AIRTABLE_BASE_ID', 'NOT SET')}")
 print(f"AIRTABLE_TABLE_NAME: {os.getenv('AIRTABLE_TABLE_NAME', 'NOT SET')}")
 print(f"TABLE_ID_VAPI_ASSISTANT: {os.getenv('TABLE_ID_VAPI_ASSISTANT', 'NOT SET')}")
 print(f"TABLE_ID_VAPI_WEBHOOK_EVENT: {os.getenv('TABLE_ID_VAPI_WEBHOOK_EVENT', 'NOT SET')}")
+print(f"VAPI_API_KEY: {os.getenv('VAPI_API_KEY', 'NOT SET')}")
 print(f"OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY', 'NOT SET')}")
 print(f"DEEPGRAM_API_KEY: {os.getenv('DEEPGRAM_API_KEY', 'NOT SET')}")
 print("=== END DEBUG ===")
@@ -37,6 +38,9 @@ class Config:
     # Retell AI Configuration
     RETELL_WEBHOOK_SECRET = os.getenv('RETELL_WEBHOOK_SECRET')
     RETELL_API_KEY = os.getenv('RETELL_API_KEY')
+    
+    # VAPI AI Configuration
+    VAPI_API_KEY = os.getenv('VAPI_API_KEY')
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
