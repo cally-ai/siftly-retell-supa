@@ -333,9 +333,6 @@ def assistant_override_variable_values():
             logger.info(f"Request content length: {request.content_length}")
             logger.info(f"Request JSON data: {data}")
             logger.info("=== END VAPI ASSISTANT OVERRIDE REQUEST DEBUG INFO ===")
-            
-            # Log the full webhook payload for debugging (but not for conversation-update)
-            logger.info(f"VAPI assistant override webhook received - Full payload: {data}")
         
         # Handle different VAPI message types
         if message_type == 'status-update':
