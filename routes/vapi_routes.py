@@ -309,20 +309,8 @@ def assistant_selector():
 def assistant_override_variable_values():
     """Handle VAPI AI assistant override variable values webhook"""
     try:
-        # Log comprehensive request information
-        logger.info("=== VAPI ASSISTANT OVERRIDE REQUEST DEBUG INFO ===")
-        logger.info(f"Request method: {request.method}")
-        logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Request URL: {request.url}")
-        logger.info(f"Request args: {dict(request.args)}")
-        logger.info(f"Request form data: {dict(request.form)}")
-        logger.info(f"Request content type: {request.content_type}")
-        logger.info(f"Request content length: {request.content_length}")
-        
-        # Get the JSON data from the request
+        # Get the JSON data from the request first to check message type
         data = request.get_json()
-        logger.info(f"Request JSON data: {data}")
-        logger.info("=== END VAPI ASSISTANT OVERRIDE REQUEST DEBUG INFO ===")
         
         if not data:
             return jsonify({'error': 'No JSON data received'}), 400
@@ -332,8 +320,20 @@ def assistant_override_variable_values():
         message_type = message.get('type')
         call_data = message.get('call', {})
         
-        # Skip logging for conversation-update messages to reduce log bloat
+        # Skip ALL logging for conversation-update messages to reduce log bloat
         if message_type != 'conversation-update':
+            # Log comprehensive request information (but not for conversation-update)
+            logger.info("=== VAPI ASSISTANT OVERRIDE REQUEST DEBUG INFO ===")
+            logger.info(f"Request method: {request.method}")
+            logger.info(f"Request headers: {dict(request.headers)}")
+            logger.info(f"Request URL: {request.url}")
+            logger.info(f"Request args: {dict(request.args)}")
+            logger.info(f"Request form data: {dict(request.form)}")
+            logger.info(f"Request content type: {request.content_type}")
+            logger.info(f"Request content length: {request.content_length}")
+            logger.info(f"Request JSON data: {data}")
+            logger.info("=== END VAPI ASSISTANT OVERRIDE REQUEST DEBUG INFO ===")
+            
             # Log the full webhook payload for debugging (but not for conversation-update)
             logger.info(f"VAPI assistant override webhook received - Full payload: {data}")
         
