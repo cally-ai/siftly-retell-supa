@@ -558,7 +558,7 @@ def vapi_new_incoming_call_event():
         try:
             # Prepare fields for Airtable using the extracted call data
             airtable_fields = {
-                'id': call_data.get('id', ''),
+                'call_id': call_data.get('id', ''),
                 'phoneNumberId': call_data.get('phoneNumberId', ''),
                 'type': call_data.get('type', ''),
                 'startedAt': call_data.get('startedAt', ''),
@@ -571,7 +571,7 @@ def vapi_new_incoming_call_event():
                 'cost': call_data.get('cost', 0),
                 'workflowId': call_data.get('workflowId', ''),
                 'from_number': call_data.get('from_number', ''),
-                'vapi_workflow_number': call_data.get('vapi_workflow_number', ''),
+                'vapi_language_workflow_number': call_data.get('vapi_workflow_number', ''),
                 'analysis_summary': call_data.get('analysis_summary', ''),
                 'analysis_succes_evaluation': call_data.get('analysis_succes_evaluation', '')
             }
