@@ -536,6 +536,9 @@ def vapi_new_incoming_call_event():
             logger.warning("No JSON data received for new incoming call event")
             return jsonify({'error': 'No JSON data received'}), 400
         
+        # Log the full webhook payload for debugging
+        logger.info(f"VAPI new incoming call event webhook - Full payload: {data}")
+        
         # Extract call_id from the webhook payload
         message = data.get('message', {})
         call_id = message.get('call', {}).get('id')
@@ -553,6 +556,9 @@ def vapi_new_incoming_call_event():
         if not call_data:
             logger.warning(f"Failed to retrieve call data for call_id: {call_id}")
             return jsonify({'error': 'Failed to retrieve call data'}), 500
+        
+        # Log the extracted call data for debugging
+        logger.info(f"Extracted VAPI call data: {call_data}")
         
         # Save detailed call data to Airtable
         try:
