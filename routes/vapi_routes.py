@@ -645,7 +645,7 @@ def vapi_new_incoming_call_event():
             }
             
             # Save to Airtable
-            record = vapi_service.airtable_service.create_record(
+            record = vapi_service.airtable_service.create_record_in_table(
                 Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
                 airtable_fields
             )

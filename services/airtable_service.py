@@ -72,6 +72,38 @@ class AirtableService:
         except Exception as e:
             logger.error(f"Failed to create Airtable record: {e}")
             return None
+
+    def create_record_in_table(self, table_name: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Create a new record in a specific Airtable table
+        
+        Args:
+            table_name: The table name/ID to create the record in
+            data: Record data dictionary
+        
+        Returns:
+            Created record or None if failed
+        """
+        if not self.api_key or not self.base_id:
+            logger.error("Airtable credentials not configured")
+            return None
+        
+        try:
+            # Create a temporary table instance for the specified table
+            temp_table = Table(self.api_key, self.base_id, table_name)
+            
+            # Validate data
+            is_valid, errors = validate_airtable_record(data)
+            if not is_valid:
+                logger.error(f"Invalid record data: {errors}")
+                return None
+            
+            record = temp_table.create(data)
+            logger.info(f"Successfully created record in table {table_name}")
+            return record
+        except Exception as e:
+            logger.error(f"Failed to create Airtable record in table {table_name}: {e}")
+            return None
     
     def get_records(self, max_records: int = None, formula: str = None) -> List[Dict[str, Any]]:
         """
