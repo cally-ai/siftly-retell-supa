@@ -543,7 +543,43 @@ def vapi_new_incoming_call_event():
         # Log the full webhook payload for debugging
         logger.info(f"VAPI new incoming call event webhook received - Full payload: {data}")
         
-        # For now, just acknowledge the webhook with a success response
+        # Save webhook event to Airtable
+        try:
+            # Extract key information from the webhook payload
+            message = data.get('message', {})
+            call_data = data.get('call', {})
+            
+            # Prepare fields for Airtable
+            airtable_fields = {
+                'webhook_payload': str(data),  # Store full payload as string
+                'message_type': message.get('type', 'unknown'),
+                'timestamp': message.get('timestamp'),
+                'call_id': call_data.get('id'),
+                'call_status': call_data.get('status'),
+                'call_type': call_data.get('type'),
+                'customer_number': call_data.get('customer', {}).get('number'),
+                'phone_number': call_data.get('phoneNumber', {}).get('number'),
+                'workflow_id': call_data.get('workflowId'),
+                'created_at': call_data.get('createdAt'),
+                'updated_at': call_data.get('updatedAt')
+            }
+            
+            # Save to Airtable
+            record = vapi_service.airtable_service.create_record(
+                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                fields=airtable_fields
+            )
+            
+            if record:
+                logger.info(f"Successfully saved webhook event to Airtable: {record.get('id')}")
+            else:
+                logger.warning("Failed to save webhook event to Airtable")
+                
+        except Exception as e:
+            logger.error(f"Error saving webhook event to Airtable: {e}")
+            # Continue processing even if Airtable save fails
+        
+        # Acknowledge the webhook with a success response
         logger.info("Successfully processed new incoming call event webhook")
         return jsonify({'status': 'success', 'message': 'New incoming call event received'}), 200
         
