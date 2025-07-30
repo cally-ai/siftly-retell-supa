@@ -516,3 +516,37 @@ def get_client_dynamic_variables():
                 "result": f"Error: {str(e)}"
             }]
         }), 500 
+
+@vapi_bp.route('/vapi-new-incoming-call-event', methods=['POST'])
+def vapi_new_incoming_call_event():
+    """Handle VAPI AI new incoming call event webhook"""
+    try:
+        # Log comprehensive request information
+        logger.info("=== VAPI NEW INCOMING CALL EVENT REQUEST DEBUG INFO ===")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(f"Request URL: {request.url}")
+        logger.info(f"Request args: {dict(request.args)}")
+        logger.info(f"Request form data: {dict(request.form)}")
+        logger.info(f"Request content type: {request.content_type}")
+        logger.info(f"Request content length: {request.content_length}")
+        
+        # Get the JSON data from the request
+        data = request.get_json()
+        logger.info(f"Request JSON data: {data}")
+        logger.info("=== END VAPI NEW INCOMING CALL EVENT REQUEST DEBUG INFO ===")
+        
+        if not data:
+            logger.warning("No JSON data received for new incoming call event")
+            return jsonify({'error': 'No JSON data received'}), 400
+        
+        # Log the full webhook payload for debugging
+        logger.info(f"VAPI new incoming call event webhook received - Full payload: {data}")
+        
+        # For now, just acknowledge the webhook with a success response
+        logger.info("Successfully processed new incoming call event webhook")
+        return jsonify({'status': 'success', 'message': 'New incoming call event received'}), 200
+        
+    except Exception as e:
+        logger.error(f"Error processing VAPI new incoming call event webhook: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500 
