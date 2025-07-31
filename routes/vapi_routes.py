@@ -70,7 +70,7 @@ class VAPIWebhookService:
             # Get the first linked vapi_assistant record
             vapi_assistant_record_id = vapi_assistant_linked_ids[0]
             vapi_assistant_record = self.airtable_service.get_record_from_table(
-                table_name=Config.TABLE_ID_VAPI_ASSISTANT,
+                table_name=Config.TABLE_ID_VAPI_WORKFLOW,
                 record_id=vapi_assistant_record_id
             )
             
@@ -280,6 +280,128 @@ class VAPIWebhookService:
         except Exception as e:
             logger.error(f"Error retrieving VAPI call data for {call_id}: {e}")
             return None
+    
+    def _find_caller_by_phone_number(self, phone_number: str) -> Optional[Dict[str, Any]]:
+        """
+        Find a caller record by phone number
+        
+        Args:
+            phone_number: The phone number to search for
+            
+        Returns:
+            Caller record if found, None otherwise
+        """
+        try:
+            caller_records = self.airtable_service.search_records_in_table(
+                table_name="tbl3mjOWELyIG2m6o",  # caller table
+                field="phone_number", 
+                value=phone_number
+            )
+            
+            if caller_records:
+                return caller_records[0]
+            else:
+                logger.info(f"No caller record found for phone number: {phone_number}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error finding caller by phone number: {e}")
+            return None
+    
+    def _find_vapi_workflow_by_workflow_id(self, workflow_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Find a VAPI workflow record by workflow_id
+        
+        Args:
+            workflow_id: The workflow ID to search for
+            
+        Returns:
+            VAPI workflow record if found, None otherwise
+        """
+        try:
+            workflow_records = self.airtable_service.search_records_in_table(
+                table_name=Config.TABLE_ID_VAPI_WORKFLOW,
+                field="workflow_id", 
+                value=workflow_id
+            )
+            
+            if workflow_records:
+                return workflow_records[0]
+            else:
+                logger.info(f"No VAPI workflow record found for workflow_id: {workflow_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error finding VAPI workflow by workflow_id: {e}")
+            return None
+    
+    def _link_vapi_event_to_caller(self, caller_record_id: str, vapi_event_record_id: str) -> bool:
+        """
+        Link a VAPI webhook event record to a caller record
+        
+        Args:
+            caller_record_id: The ID of the caller record
+            vapi_event_record_id: The ID of the VAPI webhook event record
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Update the caller record to link to the VAPI webhook event
+            update_data = {
+                'vapi_webhook_event': [vapi_event_record_id]
+            }
+            
+            result = self.airtable_service.update_record_in_table(
+                table_name="tbl3mjOWELyIG2m6o",  # caller table
+                record_id=caller_record_id,
+                data=update_data
+            )
+            
+            if result:
+                logger.info(f"Successfully linked VAPI event {vapi_event_record_id} to caller {caller_record_id}")
+                return True
+            else:
+                logger.error(f"Failed to link VAPI event {vapi_event_record_id} to caller {caller_record_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error linking VAPI event to caller: {e}")
+            return False
+    
+    def _link_vapi_event_to_workflow(self, workflow_record_id: str, vapi_event_record_id: str) -> bool:
+        """
+        Link a VAPI webhook event record to a VAPI workflow record
+        
+        Args:
+            workflow_record_id: The ID of the VAPI workflow record
+            vapi_event_record_id: The ID of the VAPI webhook event record
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Update the VAPI workflow record to link to the VAPI webhook event
+            update_data = {
+                'vapi_webhook_event': [vapi_event_record_id]
+            }
+            
+            result = self.airtable_service.update_record_in_table(
+                table_name=Config.TABLE_ID_VAPI_WORKFLOW,
+                record_id=workflow_record_id,
+                data=update_data
+            )
+            
+            if result:
+                logger.info(f"Successfully linked VAPI event {vapi_event_record_id} to workflow {workflow_record_id}")
+                return True
+            else:
+                logger.error(f"Failed to link VAPI event {vapi_event_record_id} to workflow {workflow_record_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error linking VAPI event to workflow: {e}")
+            return False
 
 # Initialize service
 vapi_service = VAPIWebhookService()
@@ -423,7 +545,7 @@ def vapi_debug():
         
         debug_info = {
             "airtable_configured": airtable_configured,
-            "vapi_assistant_table_id": Config.TABLE_ID_VAPI_ASSISTANT,
+            "vapi_workflow_table_id": Config.TABLE_ID_VAPI_WORKFLOW,
             "webhook_url": "https://siftly.onrender.com/vapi/assistant-selector"
         }
         
@@ -596,6 +718,47 @@ def vapi_new_incoming_call_event():
             
             if record:
                 logger.info(f"Successfully saved detailed call data to Airtable: {record.get('id')}")
+                
+                # Link to existing caller record if phone number matches
+                if from_number:
+                    try:
+                        # Look for existing caller record with matching phone number
+                        caller_record = vapi_service._find_caller_by_phone_number(from_number)
+                        
+                        if caller_record:
+                            caller_record_id = caller_record.get('id')
+                            logger.info(f"Found existing caller record: {caller_record_id}")
+                            
+                            # Link the VAPI webhook event to the caller record
+                            vapi_service._link_vapi_event_to_caller(caller_record_id, record.get('id'))
+                            logger.info(f"Successfully linked VAPI webhook event {record.get('id')} to caller {caller_record_id}")
+                        else:
+                            logger.info(f"No existing caller record found for phone number: {from_number}")
+                            
+                    except Exception as link_error:
+                        logger.error(f"Error linking VAPI event to caller: {link_error}")
+                        # Continue processing even if linking fails
+                
+                # Link to VAPI workflow record if workflowId matches
+                workflow_id = call_data.get('workflowId', '')
+                if workflow_id:
+                    try:
+                        # Look for existing VAPI workflow record with matching workflow_id
+                        workflow_record = vapi_service._find_vapi_workflow_by_workflow_id(workflow_id)
+                        
+                        if workflow_record:
+                            workflow_record_id = workflow_record.get('id')
+                            logger.info(f"Found existing VAPI workflow record: {workflow_record_id}")
+                            
+                            # Link the VAPI webhook event to the workflow record
+                            vapi_service._link_vapi_event_to_workflow(workflow_record_id, record.get('id'))
+                            logger.info(f"Successfully linked VAPI webhook event {record.get('id')} to workflow {workflow_record_id}")
+                        else:
+                            logger.info(f"No existing VAPI workflow record found for workflow_id: {workflow_id}")
+                            
+                    except Exception as link_error:
+                        logger.error(f"Error linking VAPI event to workflow: {link_error}")
+                        # Continue processing even if linking fails
             else:
                 logger.warning("Failed to save detailed call data to Airtable")
                 
