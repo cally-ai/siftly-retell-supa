@@ -301,7 +301,6 @@ class VAPIWebhookService:
             if caller_records:
                 return caller_records[0]
             else:
-                logger.info(f"No caller record found for phone number: {phone_number}")
                 return None
                 
         except Exception as e:
@@ -319,9 +318,6 @@ class VAPIWebhookService:
             VAPI workflow record if found, None otherwise
         """
         try:
-            # Debug logging to check the table name
-            logger.info(f"Looking for workflow_id: {workflow_id} in table: {Config.TABLE_ID_VAPI_WORKFLOW}")
-            
             if not Config.TABLE_ID_VAPI_WORKFLOW:
                 logger.error("TABLE_ID_VAPI_WORKFLOW is not configured")
                 return None
@@ -335,7 +331,6 @@ class VAPIWebhookService:
             if workflow_records:
                 return workflow_records[0]
             else:
-                logger.info(f"No VAPI workflow record found for workflow_id: {workflow_id}")
                 return None
                 
         except Exception as e:
@@ -366,7 +361,6 @@ class VAPIWebhookService:
             )
             
             if result:
-                logger.info(f"Successfully linked VAPI event {vapi_event_record_id} to caller {caller_record_id}")
                 return True
             else:
                 logger.error(f"Failed to link VAPI event {vapi_event_record_id} to caller {caller_record_id}")
@@ -400,7 +394,6 @@ class VAPIWebhookService:
             )
             
             if result:
-                logger.info(f"Successfully linked VAPI event {vapi_event_record_id} to workflow {workflow_record_id}")
                 return True
             else:
                 logger.error(f"Failed to link VAPI event {vapi_event_record_id} to workflow {workflow_record_id}")
@@ -568,6 +561,9 @@ def get_client_dynamic_variables():
     try:
         data = request.get_json()
         
+        # Log the full payload for debugging
+        logger.info(f"VAPI get-client-dynamic-variables - Full payload: {data}")
+        
         if not data:
             logger.warning("No JSON data received - checking if it's a form request")
             # Check if data is in form format instead
@@ -665,9 +661,6 @@ def vapi_new_incoming_call_event():
             logger.warning("No JSON data received for new incoming call event")
             return jsonify({'error': 'No JSON data received'}), 400
         
-        # Log the full webhook payload for debugging
-        logger.info(f"VAPI new incoming call event webhook - Full payload: {data}")
-        
         # Extract call_id and other data from the webhook payload
         message = data.get('message', {})
         call_id = message.get('call', {}).get('id')
@@ -676,13 +669,9 @@ def vapi_new_incoming_call_event():
             logger.warning("No call_id found in webhook payload")
             return jsonify({'error': 'No call_id found in payload'}), 400
         
-        logger.info(f"Processing call_id: {call_id}")
-        
         # Extract from_number and vapi_workflow_number from webhook payload
         from_number = message.get('customer', {}).get('number', '')
         vapi_workflow_number = message.get('phoneNumber', {}).get('number', '')
-        
-        logger.info(f"From webhook payload - from_number: {from_number}, vapi_workflow_number: {vapi_workflow_number}")
         
         # Retrieve detailed call data from VAPI API
         vapi_service = VAPIWebhookService()
@@ -691,9 +680,6 @@ def vapi_new_incoming_call_event():
         if not call_data:
             logger.warning(f"Failed to retrieve call data for call_id: {call_id}")
             return jsonify({'error': 'Failed to retrieve call data'}), 500
-        
-        # Log the extracted call data for debugging
-        logger.info(f"Extracted VAPI call data: {call_data}")
         
         # Save detailed call data to Airtable
         try:
@@ -724,8 +710,6 @@ def vapi_new_incoming_call_event():
             )
             
             if record:
-                logger.info(f"Successfully saved detailed call data to Airtable: {record.get('id')}")
-                
                 # Link to existing caller record if phone number matches
                 if from_number:
                     try:
@@ -734,13 +718,8 @@ def vapi_new_incoming_call_event():
                         
                         if caller_record:
                             caller_record_id = caller_record.get('id')
-                            logger.info(f"Found existing caller record: {caller_record_id}")
-                            
                             # Link the VAPI webhook event to the caller record
                             vapi_service._link_vapi_event_to_caller(caller_record_id, record.get('id'))
-                            logger.info(f"Successfully linked VAPI webhook event {record.get('id')} to caller {caller_record_id}")
-                        else:
-                            logger.info(f"No existing caller record found for phone number: {from_number}")
                             
                     except Exception as link_error:
                         logger.error(f"Error linking VAPI event to caller: {link_error}")
@@ -755,13 +734,8 @@ def vapi_new_incoming_call_event():
                         
                         if workflow_record:
                             workflow_record_id = workflow_record.get('id')
-                            logger.info(f"Found existing VAPI workflow record: {workflow_record_id}")
-                            
                             # Link the VAPI webhook event to the workflow record
                             vapi_service._link_vapi_event_to_workflow(workflow_record_id, record.get('id'))
-                            logger.info(f"Successfully linked VAPI webhook event {record.get('id')} to workflow {workflow_record_id}")
-                        else:
-                            logger.info(f"No existing VAPI workflow record found for workflow_id: {workflow_id}")
                             
                     except Exception as link_error:
                         logger.error(f"Error linking VAPI event to workflow: {link_error}")
@@ -774,7 +748,6 @@ def vapi_new_incoming_call_event():
             # Continue processing even if Airtable save fails
         
         # Acknowledge the webhook with a success response
-        logger.info("Successfully processed new incoming call event webhook")
         return jsonify({'status': 'success', 'message': 'New incoming call event received and processed'}), 200
         
     except Exception as e:
