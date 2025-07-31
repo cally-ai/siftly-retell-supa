@@ -281,6 +281,39 @@ class AirtableService:
             logger.error(f"Failed to get record {record_id} from table '{table_name}': {e}")
             return None
     
+    def update_record_in_table(self, table_name: str, record_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Update a record in a specific Airtable table
+        
+        Args:
+            table_name: The table name/ID to update the record in
+            record_id: The record ID to update
+            data: Record data dictionary to update
+        
+        Returns:
+            Updated record or None if failed
+        """
+        if not self.api_key or not self.base_id:
+            logger.error("Airtable credentials not configured")
+            return None
+        
+        try:
+            # Create a temporary table instance for the specified table
+            temp_table = Table(self.api_key, self.base_id, table_name)
+            
+            # Validate data
+            is_valid, errors = validate_airtable_record(data)
+            if not is_valid:
+                logger.error(f"Invalid record data: {errors}")
+                return None
+            
+            record = temp_table.update(record_id, data)
+            logger.info(f"Updated record {record_id} in table '{table_name}'")
+            return record
+        except Exception as e:
+            logger.error(f"Failed to update record {record_id} in table '{table_name}': {e}")
+            return None
+    
     def link_record(self, record_id: str, field_name: str, linked_record_ids: List[str]) -> bool:
         """
         Link records to a field (for linked record fields)

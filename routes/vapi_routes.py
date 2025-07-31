@@ -319,6 +319,13 @@ class VAPIWebhookService:
             VAPI workflow record if found, None otherwise
         """
         try:
+            # Debug logging to check the table name
+            logger.info(f"Looking for workflow_id: {workflow_id} in table: {Config.TABLE_ID_VAPI_WORKFLOW}")
+            
+            if not Config.TABLE_ID_VAPI_WORKFLOW:
+                logger.error("TABLE_ID_VAPI_WORKFLOW is not configured")
+                return None
+            
             workflow_records = self.airtable_service.search_records_in_table(
                 table_name=Config.TABLE_ID_VAPI_WORKFLOW,
                 field="workflow_id", 
