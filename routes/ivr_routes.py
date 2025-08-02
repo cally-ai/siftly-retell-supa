@@ -239,10 +239,14 @@ class IVRService:
                 'client': [client_id]
             }
             
+            logger.info(f"Creating VAPI webhook event with data: {event_data}")
+            
             event_record = self.airtable_service.create_record_in_table(
                 table_name="vapi_webhook_event",
                 data=event_data
             )
+            
+            logger.info(f"Airtable create_record response: {event_record}")
             
             if event_record:
                 logger.info(f"Created VAPI webhook event record: {event_record['id']} for caller {from_number}")
