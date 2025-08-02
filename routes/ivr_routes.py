@@ -242,7 +242,8 @@ class IVRService:
 # Initialize service
 ivr_service = IVRService()
 
-@ivr_bp.route('/', methods=['POST'])
+@ivr_bp.route('', methods=['POST'], strict_slashes=False)
+@ivr_bp.route('/', methods=['POST'], strict_slashes=False)
 def ivr_handler():
     """Handle incoming IVR calls from Twilio"""
     try:
@@ -292,7 +293,7 @@ def ivr_handler():
         response.say("An error occurred. Please try again later.", voice='alice')
         return Response(str(response), mimetype='text/xml')
 
-@ivr_bp.route('/handle-selection', methods=['POST'])
+@ivr_bp.route('/handle-selection', methods=['POST'], strict_slashes=False)
 def handle_selection():
     """Handle user selection from IVR"""
     try:
@@ -391,7 +392,7 @@ def handle_selection():
         response.say("An error occurred. Please try again later.", voice='alice')
         return Response(str(response), mimetype='text/xml')
 
-@ivr_bp.route('/debug', methods=['GET'])
+@ivr_bp.route('/debug', methods=['GET'], strict_slashes=False)
 def ivr_debug():
     """Debug endpoint for IVR configuration"""
     try:
