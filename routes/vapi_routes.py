@@ -725,6 +725,22 @@ def vapi_new_incoming_call_event():
                     logger.error(f"Error finding caller for linking: {link_error}")
                     # Continue without caller/client links if lookup fails
             
+            # Add VAPI workflow linked field if we can find it
+            workflow_id = call_data.get('workflowId', '')
+            if workflow_id:
+                try:
+                    # Look for existing VAPI workflow record with matching workflow_id
+                    workflow_record = vapi_service._find_vapi_workflow_by_workflow_id(workflow_id)
+                    
+                    if workflow_record:
+                        workflow_record_id = workflow_record.get('id')
+                        airtable_fields['vapi_workflow'] = [workflow_record_id]
+                        logger.info(f"Adding VAPI workflow link: {workflow_record_id} for workflow_id: {workflow_id}")
+                        
+                except Exception as link_error:
+                    logger.error(f"Error finding VAPI workflow for linking: {link_error}")
+                    # Continue without workflow link if lookup fails
+            
             logger.info(f"VAPI creating record with fields: {airtable_fields}")
             
             # Check if a record already exists for this call_id
