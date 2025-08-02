@@ -750,10 +750,13 @@ def vapi_new_incoming_call_event():
             logger.info(f"VAPI creating record with fields: {airtable_fields}")
             
             # Check for existing records that match our criteria
-            from_number = call_data.get('customer', {}).get('number', '')
+            # Use the from_number that was already extracted from the webhook payload
+            # (don't re-extract from call_data as it might not have the customer info)
             started_at = call_data.get('startedAt', '')
             
             logger.info(f"VAPI matching search - from_number: {from_number}, started_at: {started_at}")
+            logger.info(f"VAPI call_data customer: {call_data.get('customer', {})}")
+            logger.info(f"VAPI call_data keys: {list(call_data.keys())}")
             
             if from_number and started_at:
                 # Convert started_at to datetime for comparison
