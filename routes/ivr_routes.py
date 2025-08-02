@@ -155,103 +155,6 @@ class IVRService:
             logger.error(f"Error getting transfer number for {language_id}: {e}")
             return None
     
-    def get_workflow_id_from_language(self, language_id: str) -> str:
-        """
-        Get the workflow_id from a language record via the linked VAPI workflow
-        
-        Args:
-            language_id: The language record ID
-            
-        Returns:
-            The workflow_id or None if not found
-        """
-        try:
-            logger.info(f"Getting workflow_id for language_id: {language_id}")
-            
-            # Step 1: Get the language record from language table
-            language_record = self.airtable_service.get_record_from_table(
-                table_name="language",
-                record_id=language_id
-            )
-            
-            if not language_record:
-                logger.warning(f"Language record not found: {language_id}")
-                return None
-            
-            # Step 2: Get linked vapi_workflow record
-            vapi_workflow_linked_ids = language_record.get('fields', {}).get('vapi_workflow', [])
-            if not vapi_workflow_linked_ids:
-                logger.warning(f"No vapi_workflow linked to language: {language_id}")
-                return None
-            
-            vapi_workflow_id = vapi_workflow_linked_ids[0]
-            vapi_workflow_record = self.airtable_service.get_record_from_table(
-                table_name="vapi_workflow",
-                record_id=vapi_workflow_id
-            )
-            
-            if not vapi_workflow_record:
-                logger.warning(f"VAPI workflow record not found: {vapi_workflow_id}")
-                return None
-            
-            # Step 3: Extract workflow_id from the VAPI workflow record
-            workflow_id = vapi_workflow_record.get('fields', {}).get('workflow_id')
-            if not workflow_id:
-                logger.warning(f"No workflow_id found in VAPI workflow record: {vapi_workflow_id}")
-                return None
-            
-            logger.info(f"Found workflow_id: {workflow_id} for language_id: {language_id} via vapi_workflow: {vapi_workflow_id}")
-            return workflow_id
-            
-        except Exception as e:
-            logger.error(f"Error getting workflow_id for {language_id}: {e}")
-            return None
-    
-    def create_vapi_call(self, workflow_id: str, customer_number: str, external_id: str) -> bool:
-        """
-        Create a call using VAPI API
-        
-        Args:
-            workflow_id: The VAPI workflow ID
-            customer_number: The customer's phone number
-            external_id: The external ID (webhook record ID)
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            import requests
-            from config import Config
-            
-            logger.info(f"Creating VAPI call - Workflow: {workflow_id}, Customer: {customer_number}, External ID: {external_id}")
-            
-            response = requests.post(
-                "https://api.vapi.ai/call",
-                headers={
-                    "Authorization": f"Bearer {Config.VAPI_API_KEY}"
-                },
-                json={
-                    "workflowId": workflow_id,
-                    "customer": {
-                        "externalId": external_id,
-                        "number": customer_number
-                    }
-                },
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                call_data = response.json()
-                logger.info(f"Successfully created VAPI call: {call_data}")
-                return True
-            else:
-                logger.error(f"Failed to create VAPI call. Status: {response.status_code}, Response: {response.text}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error creating VAPI call: {e}")
-            return False
-    
     def find_or_create_caller(self, phone_number: str, client_id: str, language_id: str) -> str:
         """
         Find or create a caller record
@@ -315,7 +218,7 @@ class IVRService:
             logger.error(f"Error finding/creating caller for {phone_number}: {e}")
             return None
     
-    def create_vapi_webhook_event(self, from_number: str, caller_id: str, client_id: str, call_sid: str = None) -> str:
+    def create_vapi_webhook_event(self, from_number: str, caller_id: str, client_id: str) -> bool:
         """
         Create a record in the vapi_webhook_event table
         
@@ -323,25 +226,26 @@ class IVRService:
             from_number: The caller's phone number
             caller_id: The caller record ID
             client_id: The client record ID
-            call_sid: The Twilio Call SID
             
         Returns:
-            The created record ID if successful, None otherwise
+            True if successful, False otherwise
         """
         try:
             logger.info(f"Creating VAPI webhook event for caller: {from_number}")
             
-            # Prepare event data
+            # Try different field name variations
             event_data = {
                 'from_number': from_number,
                 'caller': [caller_id],
                 'client': [client_id]
             }
             
-            # Add Call SID if provided
-            if call_sid:
-                event_data['twilio_CallSid'] = call_sid
-                logger.info(f"Adding Twilio Call SID: {call_sid}")
+            # Also try with different field names in case Airtable uses different naming
+            # event_data = {
+            #     'from_number': from_number,
+            #     'Caller': [caller_id],  # Capitalized
+            #     'Client': [client_id]   # Capitalized
+            # }
             
             logger.info(f"Creating VAPI webhook event with data: {event_data}")
             logger.info(f"Caller ID being linked: {caller_id}")
@@ -362,16 +266,15 @@ class IVRService:
             logger.info(f"Airtable create_record response: {event_record}")
             
             if event_record:
-                record_id = event_record['id']
-                logger.info(f"Created VAPI webhook event record: {record_id} for caller {from_number}")
-                return record_id
+                logger.info(f"Created VAPI webhook event record: {event_record['id']} for caller {from_number}")
+                return True
             else:
                 logger.error(f"Failed to create VAPI webhook event record for {from_number}")
-                return None
+                return False
                 
         except Exception as e:
             logger.error(f"Error creating VAPI webhook event: {e}")
-            return None
+            return False
 
 # Initialize service
 ivr_service = IVRService()
@@ -463,8 +366,16 @@ def handle_selection():
         
         logger.info(f"Caller {from_number} selected option {digits}: '{selected_option['text']}' in {selected_option['language_code']}")
         
-        # Get Call SID from request
-        call_sid = request.form.get('CallSid')
+        # Get transfer number
+        transfer_number = ivr_service.get_transfer_number(selected_option['language_id'])
+        
+        if not transfer_number:
+            logger.error(f"No transfer number found for language: {selected_option['language_id']}")
+            response = VoiceResponse()
+            response.say("Sorry, transfer number not configured.", voice='alice')
+            return Response(str(response), mimetype='text/xml')
+        
+        logger.info(f"Transfer number found: {transfer_number} for language {selected_option['language_id']}")
         
         # Find or create caller record
         caller_id = ivr_service.find_or_create_caller(
@@ -481,47 +392,17 @@ def handle_selection():
         
         logger.info(f"Caller record processed - ID: {caller_id}, Client: {ivr_config['client_id']}, Language: {selected_option['language_id']}")
         
-        # Create VAPI webhook event record with Call SID
-        new_webhook_record_id = ivr_service.create_vapi_webhook_event(
+        # Create VAPI webhook event record
+        event_created = ivr_service.create_vapi_webhook_event(
             from_number,
             caller_id,
-            ivr_config['client_id'],
-            call_sid
+            ivr_config['client_id']
         )
         
-        if not new_webhook_record_id:
-            logger.error(f"Failed to create VAPI webhook event for: {from_number}")
-            response = VoiceResponse()
-            response.say("Sorry, an error occurred. Please try again.", voice='alice')
-            return Response(str(response), mimetype='text/xml')
-        
-        logger.info(f"Created VAPI webhook event record: {new_webhook_record_id} for caller {from_number}")
-        
-        # Get workflow_id from language
-        workflow_id = ivr_service.get_workflow_id_from_language(selected_option['language_id'])
-        
-        if not workflow_id:
-            logger.error(f"No workflow_id found for language: {selected_option['language_id']}")
-            response = VoiceResponse()
-            response.say("Sorry, workflow not configured.", voice='alice')
-            return Response(str(response), mimetype='text/xml')
-        
-        logger.info(f"Found workflow_id: {workflow_id} for language {selected_option['language_id']}")
-        
-        # Create VAPI call
-        vapi_call_success = ivr_service.create_vapi_call(
-            workflow_id,
-            from_number,
-            new_webhook_record_id
-        )
-        
-        if not vapi_call_success:
-            logger.error(f"Failed to create VAPI call for: {from_number}")
-            response = VoiceResponse()
-            response.say("Sorry, an error occurred. Please try again.", voice='alice')
-            return Response(str(response), mimetype='text/xml')
-        
-        logger.info(f"Successfully created VAPI call for: {from_number}")
+        if not event_created:
+            logger.warning(f"Failed to create VAPI webhook event for: {from_number}")
+        else:
+            logger.info(f"VAPI webhook event created for caller {from_number}")
         
         # Build TwiML response
         response = VoiceResponse()
@@ -535,10 +416,11 @@ def handle_selection():
                 language=selected_option['language_code']
             )
         
-        # End the call since VAPI will handle it
-        response.say("Transferring you to our AI assistant. Please wait.", voice='alice')
+        # Transfer the call
+        dial = response.dial(caller_id=from_number)
+        dial.number(transfer_number)
         
-        logger.info(f"Call setup complete for {from_number} - VAPI will handle the conversation")
+        logger.info(f"Transferring call from {from_number} to {transfer_number} with caller ID preserved")
         return Response(str(response), mimetype='text/xml')
         
     except Exception as e:
