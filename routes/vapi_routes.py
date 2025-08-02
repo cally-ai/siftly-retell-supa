@@ -741,12 +741,6 @@ def vapi_new_incoming_call_event():
                     logger.error(f"Error finding VAPI workflow for linking: {link_error}")
                     # Continue without workflow link if lookup fails
             
-            # Add created_time with current datetime in ISO format
-            from datetime import datetime
-            created_time = datetime.utcnow().isoformat() + 'Z'
-            airtable_fields['created_time'] = created_time
-            logger.info(f"Adding created_time: {created_time}")
-            
             logger.info(f"VAPI creating record with fields: {airtable_fields}")
             
             # Check for existing records that match our criteria

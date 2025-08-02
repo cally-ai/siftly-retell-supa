@@ -252,6 +252,12 @@ class IVRService:
                 event_data['twilio_StartTime'] = start_time
                 logger.info(f"Adding Twilio Start Time: {start_time}")
             
+            # Add created_time with current datetime in ISO format
+            from datetime import datetime
+            created_time = datetime.utcnow().isoformat() + 'Z'
+            event_data['created_time'] = created_time
+            logger.info(f"Adding created_time: {created_time}")
+            
             # Also try with different field names in case Airtable uses different naming
             # event_data = {
             #     'from_number': from_number,
