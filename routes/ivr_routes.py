@@ -97,7 +97,7 @@ class IVRService:
         Get the transfer number for a specific language
         
         Args:
-            language_id: The language record ID from vapi_workflow table
+            language_id: The language record ID from language table
             
         Returns:
             The transfer number or None if not found
@@ -105,9 +105,9 @@ class IVRService:
         try:
             logger.info(f"Getting transfer number for language_id: {language_id}")
             
-            # Get the language record from vapi_workflow table
+            # Step 1: Get the language record from language table
             language_record = self.airtable_service.get_record_from_table(
-                table_name="vapi_workflow",
+                table_name="language",
                 record_id=language_id
             )
             
@@ -115,10 +115,26 @@ class IVRService:
                 logger.warning(f"Language record not found: {language_id}")
                 return None
             
-            # Get linked twilio_number record
-            twilio_number_linked_ids = language_record.get('fields', {}).get('twilio_number', [])
+            # Step 2: Get linked vapi_workflow record
+            vapi_workflow_linked_ids = language_record.get('fields', {}).get('vapi_workflow', [])
+            if not vapi_workflow_linked_ids:
+                logger.warning(f"No vapi_workflow linked to language: {language_id}")
+                return None
+            
+            vapi_workflow_id = vapi_workflow_linked_ids[0]
+            vapi_workflow_record = self.airtable_service.get_record_from_table(
+                table_name="vapi_workflow",
+                record_id=vapi_workflow_id
+            )
+            
+            if not vapi_workflow_record:
+                logger.warning(f"VAPI workflow record not found: {vapi_workflow_id}")
+                return None
+            
+            # Step 3: Get linked twilio_number record
+            twilio_number_linked_ids = vapi_workflow_record.get('fields', {}).get('twilio_number', [])
             if not twilio_number_linked_ids:
-                logger.warning(f"No twilio_number linked to language: {language_id}")
+                logger.warning(f"No twilio_number linked to vapi_workflow: {vapi_workflow_id}")
                 return None
             
             twilio_number_id = twilio_number_linked_ids[0]
@@ -132,7 +148,7 @@ class IVRService:
                 return None
             
             transfer_number = twilio_number_record.get('fields', {}).get('twilio_number')
-            logger.info(f"Found transfer number: {transfer_number} for language_id: {language_id}")
+            logger.info(f"Found transfer number: {transfer_number} for language_id: {language_id} via vapi_workflow: {vapi_workflow_id}")
             return transfer_number
             
         except Exception as e:
