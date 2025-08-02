@@ -703,6 +703,28 @@ def vapi_new_incoming_call_event():
                 'analysis_succes_evaluation': call_data.get('analysis_succes_evaluation', '')
             }
             
+            # Add caller and client linked fields if we can find them
+            if from_number:
+                try:
+                    # Look for existing caller record with matching phone number
+                    caller_record = vapi_service._find_caller_by_phone_number(from_number)
+                    
+                    if caller_record:
+                        caller_record_id = caller_record.get('id')
+                        airtable_fields['caller'] = [caller_record_id]
+                        logger.info(f"Adding caller link: {caller_record_id} for {from_number}")
+                        
+                        # Also try to get the client from the caller record
+                        caller_fields = caller_record.get('fields', {})
+                        client_link = caller_fields.get('client', [])
+                        if client_link:
+                            airtable_fields['client'] = client_link
+                            logger.info(f"Adding client link: {client_link} from caller record")
+                        
+                except Exception as link_error:
+                    logger.error(f"Error finding caller for linking: {link_error}")
+                    # Continue without caller/client links if lookup fails
+            
             logger.info(f"VAPI creating record with fields: {airtable_fields}")
             
             # Check if a record already exists for this call_id
@@ -730,36 +752,7 @@ def vapi_new_incoming_call_event():
                 logger.info(f"Created new VAPI webhook event record: {record['id'] if record else 'failed'}")
             
             if record:
-                # Link to existing caller record if phone number matches
-                if from_number:
-                    try:
-                        # Look for existing caller record with matching phone number
-                        caller_record = vapi_service._find_caller_by_phone_number(from_number)
-                        
-                        if caller_record:
-                            caller_record_id = caller_record.get('id')
-                            # Link the VAPI webhook event to the caller record
-                            vapi_service._link_vapi_event_to_caller(caller_record_id, record.get('id'))
-                            
-                    except Exception as link_error:
-                        logger.error(f"Error linking VAPI event to caller: {link_error}")
-                        # Continue processing even if linking fails
-                
-                # Link to VAPI workflow record if workflowId matches
-                workflow_id = call_data.get('workflowId', '')
-                if workflow_id:
-                    try:
-                        # Look for existing VAPI workflow record with matching workflow_id
-                        workflow_record = vapi_service._find_vapi_workflow_by_workflow_id(workflow_id)
-                        
-                        if workflow_record:
-                            workflow_record_id = workflow_record.get('id')
-                            # Link the VAPI webhook event to the workflow record
-                            vapi_service._link_vapi_event_to_workflow(workflow_record_id, record.get('id'))
-                            
-                    except Exception as link_error:
-                        logger.error(f"Error linking VAPI event to workflow: {link_error}")
-                        # Continue processing even if linking fails
+                logger.info(f"Successfully created VAPI webhook event record: {record.get('id')}")
             else:
                 logger.warning("Failed to save detailed call data to Airtable")
                 
