@@ -218,7 +218,7 @@ class IVRService:
             logger.error(f"Error finding/creating caller for {phone_number}: {e}")
             return None
     
-    def create_vapi_webhook_event(self, from_number: str, caller_id: str, client_id: str) -> bool:
+    def create_vapi_webhook_event(self, from_number: str, caller_id: str, client_id: str, call_sid: str = None, start_time: str = None) -> bool:
         """
         Create a record in the vapi_webhook_event table
         
@@ -226,6 +226,8 @@ class IVRService:
             from_number: The caller's phone number
             caller_id: The caller record ID
             client_id: The client record ID
+            call_sid: The Twilio Call SID
+            start_time: The Twilio call start time
             
         Returns:
             True if successful, False otherwise
@@ -239,6 +241,16 @@ class IVRService:
                 'caller': [caller_id],
                 'client': [client_id]
             }
+            
+            # Add Twilio Call SID if provided
+            if call_sid:
+                event_data['twilio_CallSid'] = call_sid
+                logger.info(f"Adding Twilio Call SID: {call_sid}")
+            
+            # Add Twilio Start Time if provided
+            if start_time:
+                event_data['twilio_StartTime'] = start_time
+                logger.info(f"Adding Twilio Start Time: {start_time}")
             
             # Also try with different field names in case Airtable uses different naming
             # event_data = {
@@ -396,7 +408,9 @@ def handle_selection():
         event_created = ivr_service.create_vapi_webhook_event(
             from_number,
             caller_id,
-            ivr_config['client_id']
+            ivr_config['client_id'],
+            call_sid,  # Pass the Twilio Call SID
+            request.form.get('StartTime')  # Pass the Twilio Start Time
         )
         
         if not event_created:
