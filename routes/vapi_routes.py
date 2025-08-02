@@ -753,11 +753,14 @@ def vapi_new_incoming_call_event():
             from_number = call_data.get('customer', {}).get('number', '')
             started_at = call_data.get('startedAt', '')
             
+            logger.info(f"VAPI matching search - from_number: {from_number}, started_at: {started_at}")
+            
             if from_number and started_at:
                 # Convert started_at to datetime for comparison
                 from datetime import datetime
                 try:
                     started_at_dt = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+                    logger.info(f"VAPI started_at datetime: {started_at_dt}")
                     
                     # Search for records with empty call_id and matching from_number
                     existing_records = vapi_service.airtable_service.search_records_in_table(
@@ -766,25 +769,41 @@ def vapi_new_incoming_call_event():
                         value=from_number
                     )
                     
+                    logger.info(f"VAPI found {len(existing_records)} existing records with from_number: {from_number}")
+                    
                     # Filter records that have empty call_id and are within 2 minutes
                     matching_records = []
-                    for record in existing_records:
+                    for i, record in enumerate(existing_records):
                         record_fields = record.get('fields', {})
                         call_id = record_fields.get('call_id', '')
                         created_time = record_fields.get('created_time', '')
                         
+                        logger.info(f"VAPI checking record {i+1}: id={record['id']}, call_id='{call_id}', created_time='{created_time}'")
+                        
                         # Check if call_id is empty
                         if not call_id or call_id == '':
+                            logger.info(f"VAPI record {record['id']} has empty call_id, checking time")
                             # Check if created_time is within 2 minutes of started_at
                             if created_time:
                                 try:
                                     created_dt = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
                                     time_diff = abs((started_at_dt - created_dt).total_seconds())
                                     
+                                    logger.info(f"VAPI time comparison: created_dt={created_dt}, time_diff={time_diff}s")
+                                    
                                     if time_diff <= 120:  # 2 minutes = 120 seconds
                                         matching_records.append(record)
+                                        logger.info(f"VAPI record {record['id']} MATCHES criteria (time_diff={time_diff}s)")
+                                    else:
+                                        logger.info(f"VAPI record {record['id']} REJECTED (time_diff={time_diff}s > 120s)")
                                 except Exception as e:
                                     logger.warning(f"Error parsing created_time {created_time}: {e}")
+                            else:
+                                logger.info(f"VAPI record {record['id']} has no created_time")
+                        else:
+                            logger.info(f"VAPI record {record['id']} REJECTED (has call_id: '{call_id}')")
+                    
+                    logger.info(f"VAPI found {len(matching_records)} matching records")
                     
                     # If we have matching records, update the newest one
                     if matching_records:
@@ -792,7 +811,7 @@ def vapi_new_incoming_call_event():
                         matching_records.sort(key=lambda x: x.get('fields', {}).get('created_time', ''), reverse=True)
                         newest_record = matching_records[0]
                         
-                        logger.info(f"Found {len(matching_records)} matching records, updating newest: {newest_record['id']}")
+                        logger.info(f"VAPI updating newest matching record: {newest_record['id']}")
                         
                         # Update the existing record
                         record = vapi_service.airtable_service.update_record_in_table(
@@ -800,32 +819,32 @@ def vapi_new_incoming_call_event():
                             record_id=newest_record['id'],
                             data=airtable_fields
                         )
-                        logger.info(f"Updated existing VAPI webhook event record: {newest_record['id']}")
+                        logger.info(f"VAPI updated existing record: {newest_record['id']}")
                     else:
                         # No matching records found, create new one
-                        logger.info(f"No matching records found for {from_number}, creating new record")
+                        logger.info(f"VAPI no matching records found for {from_number}, creating new record")
                         record = vapi_service.airtable_service.create_record_in_table(
                             Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
                             airtable_fields
                         )
-                        logger.info(f"Created new VAPI webhook event record: {record['id'] if record else 'failed'}")
+                        logger.info(f"VAPI created new record: {record['id'] if record else 'failed'}")
                         
                 except Exception as e:
-                    logger.error(f"Error processing datetime comparison: {e}")
+                    logger.error(f"VAPI error processing datetime comparison: {e}")
                     # Fallback to creating new record
                     record = vapi_service.airtable_service.create_record_in_table(
                         Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
                         airtable_fields
                     )
-                    logger.info(f"Created new VAPI webhook event record (fallback): {record['id'] if record else 'failed'}")
+                    logger.info(f"VAPI created new record (fallback): {record['id'] if record else 'failed'}")
             else:
                 # Missing required data, create new record
-                logger.warning(f"Missing from_number or started_at, creating new record")
+                logger.warning(f"VAPI missing from_number or started_at, creating new record")
                 record = vapi_service.airtable_service.create_record_in_table(
                     Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
                     airtable_fields
                 )
-                logger.info(f"Created new VAPI webhook event record: {record['id'] if record else 'failed'}")
+                logger.info(f"VAPI created new record: {record['id'] if record else 'failed'}")
             
             if record:
                 logger.info(f"Successfully created VAPI webhook event record: {record.get('id')}")
