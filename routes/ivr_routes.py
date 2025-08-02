@@ -233,13 +233,30 @@ class IVRService:
         try:
             logger.info(f"Creating VAPI webhook event for caller: {from_number}")
             
+            # Try different field name variations
             event_data = {
                 'from_number': from_number,
                 'caller': [caller_id],
                 'client': [client_id]
             }
             
+            # Also try with different field names in case Airtable uses different naming
+            # event_data = {
+            #     'from_number': from_number,
+            #     'Caller': [caller_id],  # Capitalized
+            #     'Client': [client_id]   # Capitalized
+            # }
+            
             logger.info(f"Creating VAPI webhook event with data: {event_data}")
+            logger.info(f"Caller ID being linked: {caller_id}")
+            logger.info(f"Client ID being linked: {client_id}")
+            
+            # Verify the caller record exists
+            caller_record = self.airtable_service.get_record_from_table("caller", caller_id)
+            if caller_record:
+                logger.info(f"Caller record exists: {caller_record.get('fields', {}).get('phone_number', 'unknown')}")
+            else:
+                logger.error(f"Caller record {caller_id} does not exist!")
             
             event_record = self.airtable_service.create_record_in_table(
                 table_name="vapi_webhook_event",
