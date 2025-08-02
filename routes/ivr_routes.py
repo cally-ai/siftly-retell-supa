@@ -352,7 +352,12 @@ def handle_selection():
         digits = request.form.get('Digits')
         call_sid = request.form.get('CallSid')
         
+        # Debug: Log all Twilio form data to see available fields
         logger.info(f"IVR selection received - From: {from_number}, To: {to_number}, Digits: {digits}")
+        logger.info(f"Full Twilio form data: {dict(request.form)}")
+        logger.info(f"StartTime from Twilio: {request.form.get('StartTime')}")
+        logger.info(f"CallStartTime from Twilio: {request.form.get('CallStartTime')}")
+        logger.info(f"StartTime from Twilio: {request.form.get('start_time')}")
         
         # Get IVR configuration again
         ivr_config = ivr_service.get_ivr_configuration(to_number)
@@ -405,12 +410,14 @@ def handle_selection():
         logger.info(f"Caller record processed - ID: {caller_id}, Client: {ivr_config['client_id']}, Language: {selected_option['language_id']}")
         
         # Create VAPI webhook event record
+        # Try different possible field names for start time
+        start_time = request.form.get('StartTime') or request.form.get('CallStartTime') or request.form.get('start_time')
         event_created = ivr_service.create_vapi_webhook_event(
             from_number,
             caller_id,
             ivr_config['client_id'],
             call_sid,  # Pass the Twilio Call SID
-            request.form.get('StartTime')  # Pass the Twilio Start Time
+            start_time  # Pass the Twilio Start Time
         )
         
         if not event_created:
