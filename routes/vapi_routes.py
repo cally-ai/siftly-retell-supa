@@ -703,11 +703,31 @@ def vapi_new_incoming_call_event():
                 'analysis_succes_evaluation': call_data.get('analysis_succes_evaluation', '')
             }
             
-            # Save to Airtable
-            record = vapi_service.airtable_service.create_record_in_table(
-                Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                airtable_fields
+            logger.info(f"VAPI creating record with fields: {airtable_fields}")
+            
+            # Check if a record already exists for this call_id
+            existing_records = vapi_service.airtable_service.search_records_in_table(
+                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                field="call_id",
+                value=call_id
             )
+            
+            if existing_records:
+                # Update existing record instead of creating new one
+                existing_record = existing_records[0]
+                record = vapi_service.airtable_service.update_record_in_table(
+                    table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                    record_id=existing_record['id'],
+                    data=airtable_fields
+                )
+                logger.info(f"Updated existing VAPI webhook event record: {existing_record['id']}")
+            else:
+                # Create new record
+                record = vapi_service.airtable_service.create_record_in_table(
+                    Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                    airtable_fields
+                )
+                logger.info(f"Created new VAPI webhook event record: {record['id'] if record else 'failed'}")
             
             if record:
                 # Link to existing caller record if phone number matches

@@ -98,6 +98,7 @@ class AirtableService:
                 logger.error(f"Invalid record data: {errors}")
                 return None
             
+            logger.info(f"Sending data to Airtable table {table_name}: {data}")
             record = temp_table.create(data)
             logger.info(f"Successfully created record in table {table_name}")
             return record
