@@ -218,7 +218,7 @@ class IVRService:
             logger.error(f"Error finding/creating caller for {phone_number}: {e}")
             return None
     
-    def create_vapi_webhook_event(self, from_number: str, caller_id: str, client_id: str) -> bool:
+    def create_vapi_webhook_event(self, from_number: str, caller_id: str, client_id: str, call_sid: str = None) -> bool:
         """
         Create a record in the vapi_webhook_event table
         
@@ -226,6 +226,7 @@ class IVRService:
             from_number: The caller's phone number
             caller_id: The caller record ID
             client_id: The client record ID
+            call_sid: The Twilio Call SID (optional)
             
         Returns:
             True if successful, False otherwise
@@ -240,12 +241,10 @@ class IVRService:
                 'client': [client_id]
             }
             
-            # Also try with different field names in case Airtable uses different naming
-            # event_data = {
-            #     'from_number': from_number,
-            #     'Caller': [caller_id],  # Capitalized
-            #     'Client': [client_id]   # Capitalized
-            # }
+            # Add Call SID if provided
+            if call_sid:
+                event_data['twilio_CallSid'] = call_sid
+                logger.info(f"Adding Twilio Call SID: {call_sid}")
             
             logger.info(f"Creating VAPI webhook event with data: {event_data}")
             logger.info(f"Caller ID being linked: {caller_id}")
@@ -392,11 +391,13 @@ def handle_selection():
         
         logger.info(f"Caller record processed - ID: {caller_id}, Client: {ivr_config['client_id']}, Language: {selected_option['language_id']}")
         
-        # Create VAPI webhook event record
+        # Create VAPI webhook event record with Call SID
+        call_sid = request.form.get('CallSid')
         event_created = ivr_service.create_vapi_webhook_event(
             from_number,
             caller_id,
-            ivr_config['client_id']
+            ivr_config['client_id'],
+            call_sid
         )
         
         if not event_created:
