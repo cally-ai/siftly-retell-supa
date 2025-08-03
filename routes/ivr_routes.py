@@ -482,10 +482,10 @@ def status_callback():
         airtable_service = AirtableService()
         
         # Search for existing record with matching twilio_CallSid
-        search_criteria = f"{{twilio_CallSid}}='{call_sid}'"
-        records = airtable_service.search_records(
+        records = airtable_service.search_records_in_table(
             table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-            search_criteria=search_criteria
+            field="twilio_CallSid",
+            value=call_sid
         )
         
         if not records:
@@ -584,10 +584,10 @@ def fetch_and_update_vapi_call_data(call_id: str) -> bool:
         
         # Find the Airtable record by call_id
         airtable_service = AirtableService()
-        search_criteria = f"{{call_id}}='{call_id}'"
-        records = airtable_service.search_records(
+        records = airtable_service.search_records_in_table(
             table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-            search_criteria=search_criteria
+            field="call_id",
+            value=call_id
         )
         
         if not records:
