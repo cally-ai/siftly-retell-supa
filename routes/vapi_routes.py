@@ -780,13 +780,14 @@ def vapi_new_incoming_call_event():
                         # Check if call_id is empty
                         if not call_id or call_id == '':
                             logger.info(f"VAPI record {record['id']} has empty call_id, checking time")
-                            # Check if created_time is within 2 minutes of started_at
-                            if created_time:
+                            # Check if transferred_time is within 2 minutes of started_at
+                            transferred_time = record_fields.get('transferred_time', '')
+                            if transferred_time:
                                 try:
-                                    created_dt = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
-                                    time_diff = abs((started_at_dt - created_dt).total_seconds())
+                                    transferred_dt = datetime.fromisoformat(transferred_time.replace('Z', '+00:00'))
+                                    time_diff = abs((started_at_dt - transferred_dt).total_seconds())
                                     
-                                    logger.info(f"VAPI time comparison: created_dt={created_dt}, time_diff={time_diff}s")
+                                    logger.info(f"VAPI time comparison: transferred_dt={transferred_dt}, time_diff={time_diff}s")
                                     
                                     if time_diff <= 120:  # 2 minutes = 120 seconds
                                         matching_records.append(record)
@@ -794,9 +795,9 @@ def vapi_new_incoming_call_event():
                                     else:
                                         logger.info(f"VAPI record {record['id']} REJECTED (time_diff={time_diff}s > 120s)")
                                 except Exception as e:
-                                    logger.warning(f"Error parsing created_time {created_time}: {e}")
+                                    logger.warning(f"Error parsing transferred_time {transferred_time}: {e}")
                             else:
-                                logger.info(f"VAPI record {record['id']} has no created_time")
+                                logger.info(f"VAPI record {record['id']} has no transferred_time")
                         else:
                             logger.info(f"VAPI record {record['id']} REJECTED (has call_id: '{call_id}')")
                     
@@ -804,8 +805,8 @@ def vapi_new_incoming_call_event():
                     
                     # If we have matching records, update the newest one
                     if matching_records:
-                        # Sort by created_time (newest first) and take the first one
-                        matching_records.sort(key=lambda x: x.get('fields', {}).get('created_time', ''), reverse=True)
+                        # Sort by transferred_time (newest first) and take the first one
+                        matching_records.sort(key=lambda x: x.get('fields', {}).get('transferred_time', ''), reverse=True)
                         newest_record = matching_records[0]
                         
                         logger.info(f"VAPI updating newest matching record: {newest_record['id']}")
