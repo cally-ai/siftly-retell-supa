@@ -456,6 +456,81 @@ def handle_selection():
         response.say("An error occurred. Please try again later.", voice='alice')
         return Response(str(response), mimetype='text/xml')
 
+@ivr_bp.route('/status-callback', methods=['POST'])
+def status_callback():
+    """Handle Twilio status callbacks and update existing vapi_webhook_event records"""
+    try:
+        # Log and parse values from request.form
+        call_sid = request.form.get('CallSid')
+        call_status = request.form.get('CallStatus')
+        from_number = request.form.get('From')
+        to_number = request.form.get('To')
+        start_time = request.form.get('StartTime')
+        end_time = request.form.get('EndTime')
+        call_duration = request.form.get('CallDuration')
+        
+        logger.info(f"Twilio status callback received - CallSid: {call_sid}, Status: {call_status}")
+        logger.info(f"Status callback data - From: {from_number}, To: {to_number}, StartTime: {start_time}, EndTime: {end_time}, Duration: {call_duration}")
+        
+        if not call_sid:
+            logger.warning("No CallSid provided in status callback")
+            return '', 200
+        
+        # Look up the corresponding Airtable record in vapi_webhook_event table
+        # where twilio_CallSid matches the incoming CallSid
+        airtable_service = AirtableService()
+        
+        # Search for existing record with matching twilio_CallSid
+        search_criteria = f"{{twilio_CallSid}}='{call_sid}'"
+        records = airtable_service.search_records(
+            table_name=TABLE_ID_VAPI_WEBHOOK_EVENT,
+            search_criteria=search_criteria
+        )
+        
+        if not records:
+            logger.warning(f"No vapi_webhook_event record found with twilio_CallSid: {call_sid}")
+            return '', 200
+        
+        # Update the first matching record (should be only one)
+        record = records[0]
+        record_id = record['id']
+        
+        logger.info(f"Found matching vapi_webhook_event record: {record_id}")
+        
+        # Prepare update data
+        update_data = {}
+        
+        if call_sid:
+            update_data['twilio_CallSid'] = call_sid
+        if from_number:
+            update_data['from_number'] = from_number
+        if to_number:
+            update_data['to_number'] = to_number
+        if start_time:
+            update_data['twilio_StartTime'] = start_time
+        if end_time:
+            update_data['twilio_EndTime'] = end_time
+        if call_duration:
+            update_data['twilio_Duration'] = call_duration
+        
+        if update_data:
+            # Update the record in Airtable
+            airtable_service.update_record_in_table(
+                table_name=TABLE_ID_VAPI_WEBHOOK_EVENT,
+                record_id=record_id,
+                data=update_data
+            )
+            
+            logger.info(f"Successfully updated vapi_webhook_event record {record_id} with status callback data")
+        else:
+            logger.info(f"No new data to update for record {record_id}")
+        
+        return '', 200
+        
+    except Exception as e:
+        logger.error(f"Error processing Twilio status callback: {str(e)}")
+        return '', 200  # Always return 200 to Twilio even on error
+
 @ivr_bp.route('/debug', methods=['GET'], strict_slashes=False)
 def ivr_debug():
     """Debug endpoint for IVR configuration"""
