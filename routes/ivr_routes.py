@@ -456,7 +456,7 @@ def handle_selection():
         response.say("An error occurred. Please try again later.", voice='alice')
         return Response(str(response), mimetype='text/xml')
 
-@ivr_bp.route('/status-callback', methods=['POST'])
+@ivr_bp.route('/status-callback', methods=['POST'], strict_slashes=False)
 def status_callback():
     """Handle Twilio status callbacks and update existing vapi_webhook_event records"""
     try:
