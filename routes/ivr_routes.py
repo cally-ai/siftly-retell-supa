@@ -529,8 +529,9 @@ def status_callback():
                 logger.info(f"Branch 1: Added child call SID: {child_sid}")
             
             # Add parent call details with _ivr suffix
-            if parent_call.from_:
-                update_data['twilio_From_ivr'] = parent_call.from_
+            from_number = getattr(parent_call, "from_", None)
+            if from_number:
+                update_data['twilio_From_ivr'] = from_number
             if parent_call.to:
                 update_data['twilio_To_ivr'] = parent_call.to
             if parent_call.start_time:
@@ -554,6 +555,24 @@ def status_callback():
                     data=update_data
                 )
                 logger.info(f"Branch 1: Successfully updated vapi_webhook_event record {record_id} with IVR call completion data")
+                
+                # Extract call_id and fetch VAPI call data
+                updated_record = airtable_service.get_record_from_table(
+                    table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                    record_id=record_id
+                )
+                
+                if updated_record and updated_record.get('fields', {}).get('call_id'):
+                    call_id = updated_record['fields']['call_id']
+                    logger.info(f"Branch 1: Extracted call_id: {call_id} from updated record")
+                    
+                    if call_id and call_id.strip():
+                        logger.info(f"Branch 1: Triggering VAPI call data fetch for call_id: {call_id}")
+                        fetch_and_update_vapi_call_data(call_id)
+                    else:
+                        logger.warning(f"Branch 1: Empty or invalid call_id: '{call_id}'")
+                else:
+                    logger.warning(f"Branch 1: No call_id found in updated record {record_id}")
             else:
                 logger.info(f"Branch 1: No new IVR data to update for record {record_id}")
             
@@ -584,8 +603,9 @@ def status_callback():
             # 2b. Prepare update data (no _ivr suffix)
             update_data = {}
             
-            if child_call.from_:
-                update_data['twilio_From'] = child_call.from_
+            from_number = getattr(child_call, "from_", None)
+            if from_number:
+                update_data['twilio_From'] = from_number
             if child_call.to:
                 update_data['twilio_To'] = child_call.to
             if child_call.start_time:
@@ -668,8 +688,9 @@ def status_callback():
                     update_data['twilio_CallSid'] = call_sid
                     
                     # Also fetch this call's details and fill twilio_From, twilio_To, etc.
-                    if call_details.from_:
-                        update_data['twilio_From'] = call_details.from_
+                    from_number = getattr(call_details, "from_", None)
+                    if from_number:
+                        update_data['twilio_From'] = from_number
                     if call_details.to:
                         update_data['twilio_To'] = call_details.to
                     if call_details.start_time:
