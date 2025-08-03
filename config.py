@@ -16,6 +16,8 @@ print(f"AIRTABLE_TABLE_NAME: {os.getenv('AIRTABLE_TABLE_NAME', 'NOT SET')}")
 print(f"TABLE_ID_VAPI_WORKFLOW: {os.getenv('TABLE_ID_VAPI_WORKFLOW', 'NOT SET')}")
 print(f"TABLE_ID_VAPI_WEBHOOK_EVENT: {os.getenv('TABLE_ID_VAPI_WEBHOOK_EVENT', 'NOT SET')}")
 print(f"VAPI_API_KEY: {os.getenv('VAPI_API_KEY', 'NOT SET')}")
+print(f"TWILIO_ACCOUNT_SID: {os.getenv('TWILIO_ACCOUNT_SID', 'NOT SET')}")
+print(f"TWILIO_AUTH_TOKEN: {os.getenv('TWILIO_AUTH_TOKEN', 'NOT SET')}")
 print(f"OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY', 'NOT SET')}")
 print(f"DEEPGRAM_API_KEY: {os.getenv('DEEPGRAM_API_KEY', 'NOT SET')}")
 print("=== END DEBUG ===")
@@ -41,6 +43,10 @@ class Config:
     
     # VAPI AI Configuration
     VAPI_API_KEY = os.getenv('VAPI_API_KEY')
+    
+    # Twilio Configuration
+    TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+    TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
