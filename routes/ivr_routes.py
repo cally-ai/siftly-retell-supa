@@ -473,215 +473,167 @@ def status_callback():
         # Log and parse values from request.form
         call_sid = request.form.get('CallSid')
         call_status = request.form.get('CallStatus')
-        from_number = request.form.get('From')
-        to_number = request.form.get('To')
-        start_time = request.form.get('StartTime')
-        end_time = request.form.get('EndTime')
-        call_duration = request.form.get('CallDuration')
         
         logger.info(f"Twilio status callback received - CallSid: {call_sid}, Status: {call_status}")
-        logger.info(f"Status callback data - From: {from_number}, To: {to_number}, StartTime: {start_time}, EndTime: {end_time}, Duration: {call_duration}")
-        
-        # Check for ParentCallSid field
-        parent_call_sid = request.form.get('ParentCallSid')
-        logger.info(f"ParentCallSid: {parent_call_sid}")
         
         if not call_sid:
             logger.warning("No CallSid provided in status callback")
             return '', 200
         
+        # Only handle "completed" status
+        if call_status != "completed":
+            logger.info(f"Received status '{call_status}' - no action needed")
+            return '', 200
+        
         # Initialize Airtable service
         airtable_service = AirtableService()
         
-        # Handle different logic based on ParentCallSid presence and call status
-        if parent_call_sid and parent_call_sid.strip() != '':
-            # ParentCallSid has a value - handle VAPI call
-            if call_status == "answered":
-                logger.info(f"ParentCallSid has value and call status is 'answered' - Processing VAPI call start")
-                
-                # Get VAPI call start data
-                call_sid = request.form.get('CallSid')
-                call_status = request.form.get('CallStatus')
-                from_number = request.form.get('From')
-                to_number = request.form.get('To')
-                start_time = request.form.get('StartTime')
-                parent_call_sid = request.form.get('ParentCallSid')
-                direction = request.form.get('Direction')
-                
-                logger.info(f"VAPI call start data - CallSid: {call_sid}, Status: {call_status}, From: {from_number}, To: {to_number}, StartTime: {start_time}, ParentCallSid: {parent_call_sid}, Direction: {direction}")
-                
-                if not call_sid:
-                    logger.warning("No CallSid provided in VAPI call start")
-                    return '', 200
-                
-                # Look up records in vapi_webhook_event table by twilio_ParentCallSid field
-                records = airtable_service.search_records_in_table(
-                    table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                    field="twilio_ParentCallSid",
-                    value=parent_call_sid
-                )
-                
-                if not records:
-                    logger.warning(f"No vapi_webhook_event record found with twilio_ParentCallSid: {parent_call_sid}")
-                    return '', 200
-                
-                # Update the first matching record
-                record = records[0]
-                record_id = record['id']
-                
-                logger.info(f"Found matching vapi_webhook_event record for VAPI call: {record_id}")
-                
-                # Prepare VAPI update data
-                update_data = {}
-                
-                if call_sid:
-                    update_data['twilio_CallSid'] = call_sid
-                if from_number:
-                    update_data['twilio_From'] = from_number
-                if to_number:
-                    update_data['twilio_To'] = to_number
-                if start_time:
-                    update_data['twilio_StartTime'] = start_time
-                if parent_call_sid:
-                    update_data['twilio_ParentCallSid'] = parent_call_sid
-                if direction:
-                    update_data['Direction'] = direction
-                
-                if update_data:
-                    # Update the record in Airtable
-                    airtable_service.update_record_in_table(
-                        table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                        record_id=record_id,
-                        data=update_data
-                    )
-                    
-                    logger.info(f"Successfully updated vapi_webhook_event record {record_id} with VAPI call start data")
-                else:
-                    logger.info(f"No new VAPI data to update for record {record_id}")
-                
-                return '', 200
+        # Step 1: Try to find a match in twilio_CallSid_ivr (IVR leg)
+        logger.info(f"Checking for IVR leg match with CallSid: {call_sid}")
+        ivr_match = airtable_service.search_records_in_table(
+            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+            field="twilio_CallSid_ivr",
+            value=call_sid
+        )
         
-        elif not parent_call_sid or parent_call_sid.strip() == '':
-            # Handle IVR call completion (existing logic)
-            logger.info(f"ParentCallSid is empty or not present - Processing IVR call completion")
-            
-            # Get IVR-specific data
-            call_sid = request.form.get('CallSid')
-            end_time = request.form.get('EndTime')
-            call_duration = request.form.get('CallDuration')
-            
-            logger.info(f"IVR call completion data - CallSid: {call_sid}, EndTime: {end_time}, Duration: {call_duration}")
-            
-            if not call_sid:
-                logger.warning("No CallSid provided in IVR status callback")
-                return '', 200
-            
-            # Look up records in vapi_webhook_event table by twilio_CallSid_ivr field
-            records = airtable_service.search_records_in_table(
-                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                field="twilio_CallSid_ivr",
-                value=call_sid
-            )
-            
-            if not records:
-                logger.warning(f"No vapi_webhook_event record found with twilio_CallSid_ivr: {call_sid}")
-                return '', 200
-            
-            # Update the first matching record
-            record = records[0]
+        if ivr_match:
+            # Handle completed webhook for the IVR leg
+            logger.info(f"Found IVR leg match - processing IVR call completion")
+            record = ivr_match[0]
             record_id = record['id']
             
-            logger.info(f"Found matching vapi_webhook_event record for IVR call: {record_id}")
+            # Initialize Twilio client
+            from twilio.rest import Client
+            client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
             
-            # Prepare IVR update data
+            # 2a. Fetch the child call from Twilio using the parent SID
+            logger.info(f"Fetching child calls for parent CallSid: {call_sid}")
+            child_calls = client.calls.list(parent_call_sid=call_sid, limit=1)
+            child_sid = None
+            if child_calls:
+                child_sid = child_calls[0].sid
+                logger.info(f"Found child call SID: {child_sid}")
+            else:
+                logger.warning(f"No child calls found for parent CallSid: {call_sid}")
+            
+            # 2b. Fetch the parent call details (IVR leg)
+            logger.info(f"Fetching parent call details for CallSid: {call_sid}")
+            parent_call = client.calls(call_sid).fetch()
+            
+            # 2c. Prepare update data with _ivr suffix
             update_data = {}
             
-            if end_time:
-                update_data['twilio_EndTime_ivr'] = end_time
-            if call_duration:
-                update_data['twilio_Duration_ivr'] = call_duration
+            if child_sid:
+                update_data['twilio_CallSid'] = child_sid
+                update_data['twilio_ChildCallSid_ivr'] = child_sid
+                logger.info(f"Added child call SID: {child_sid}")
             
+            # Add parent call details with _ivr suffix
+            if parent_call.from_:
+                update_data['twilio_From_ivr'] = parent_call.from_
+            if parent_call.to:
+                update_data['twilio_To_ivr'] = parent_call.to
+            if parent_call.start_time:
+                update_data['twilio_StartTime_ivr'] = parent_call.start_time.isoformat()
+            if parent_call.end_time:
+                update_data['twilio_EndTime_ivr'] = parent_call.end_time.isoformat()
+            if parent_call.duration:
+                update_data['twilio_Duration_ivr'] = parent_call.duration
+            if parent_call.direction:
+                update_data['twilio_Direction_ivr'] = parent_call.direction
+            if parent_call.price:
+                update_data['twilio_price_ivr'] = parent_call.price
+            
+            logger.info(f"IVR leg update data: {update_data}")
+            
+            # 2d. Update the record in Airtable
             if update_data:
-                # Update the record in Airtable
                 airtable_service.update_record_in_table(
                     table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
                     record_id=record_id,
                     data=update_data
                 )
-                
                 logger.info(f"Successfully updated vapi_webhook_event record {record_id} with IVR call completion data")
             else:
                 logger.info(f"No new IVR data to update for record {record_id}")
             
             return '', 200
         
-        # Look up the corresponding Airtable record in vapi_webhook_event table
-        # where twilio_CallSid matches the incoming CallSid
-        
-        # Search for existing record with matching twilio_CallSid
-        records = airtable_service.search_records_in_table(
+        # Step 2: If no match in twilio_CallSid_ivr, try matching in twilio_CallSid (transferred leg)
+        logger.info(f"Checking for transferred leg match with CallSid: {call_sid}")
+        child_match = airtable_service.search_records_in_table(
             table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
             field="twilio_CallSid",
             value=call_sid
         )
         
-        if not records:
-            logger.warning(f"No vapi_webhook_event record found with twilio_CallSid: {call_sid}")
+        if child_match:
+            # Handle completed webhook for the transferred (child) leg
+            logger.info(f"Found transferred leg match - processing transferred call completion")
+            record = child_match[0]
+            record_id = record['id']
+            
+            # Initialize Twilio client
+            from twilio.rest import Client
+            client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
+            
+            # 3a. Fetch full call details for the child call
+            logger.info(f"Fetching child call details for CallSid: {call_sid}")
+            child_call = client.calls(call_sid).fetch()
+            
+            # 3b. Prepare update data (no _ivr suffix)
+            update_data = {}
+            
+            if child_call.from_:
+                update_data['twilio_From'] = child_call.from_
+            if child_call.to:
+                update_data['twilio_To'] = child_call.to
+            if child_call.start_time:
+                update_data['twilio_StartTime'] = child_call.start_time.isoformat()
+            if child_call.end_time:
+                update_data['twilio_EndTime'] = child_call.end_time.isoformat()
+            if child_call.duration:
+                update_data['twilio_Duration'] = child_call.duration
+            if child_call.direction:
+                update_data['twilio_Direction'] = child_call.direction
+            if child_call.price:
+                update_data['twilio_price'] = child_call.price
+            
+            logger.info(f"Transferred leg update data: {update_data}")
+            
+            # 3c. Update the record in Airtable
+            if update_data:
+                airtable_service.update_record_in_table(
+                    table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                    record_id=record_id,
+                    data=update_data
+                )
+                logger.info(f"Successfully updated vapi_webhook_event record {record_id} with transferred call completion data")
+                
+                # Extract call_id and fetch VAPI call data
+                updated_record = airtable_service.get_record_from_table(
+                    table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                    record_id=record_id
+                )
+                
+                if updated_record and updated_record.get('fields', {}).get('call_id'):
+                    call_id = updated_record['fields']['call_id']
+                    logger.info(f"Extracted call_id: {call_id} from updated record")
+                    
+                    if call_id and call_id.strip():
+                        logger.info(f"Triggering VAPI call data fetch for call_id: {call_id}")
+                        fetch_and_update_vapi_call_data(call_id)
+                    else:
+                        logger.warning(f"Empty or invalid call_id: '{call_id}'")
+                else:
+                    logger.warning(f"No call_id found in updated record {record_id}")
+            else:
+                logger.info(f"No new transferred call data to update for record {record_id}")
+            
             return '', 200
         
-        # Update the first matching record (should be only one)
-        record = records[0]
-        record_id = record['id']
-        
-        logger.info(f"Found matching vapi_webhook_event record: {record_id}")
-        
-        # Prepare update data
-        update_data = {}
-        
-        if call_sid:
-            update_data['twilio_CallSid'] = call_sid
-        if from_number:
-            update_data['from_number'] = from_number
-        if to_number:
-            update_data['to_number'] = to_number
-        if start_time:
-            update_data['twilio_StartTime'] = start_time
-        if end_time:
-            update_data['twilio_EndTime'] = end_time
-        if call_duration:
-            update_data['twilio_Duration'] = call_duration
-        
-        if update_data:
-            # Update the record in Airtable
-            airtable_service.update_record_in_table(
-                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                record_id=record_id,
-                data=update_data
-            )
-            
-            logger.info(f"Successfully updated vapi_webhook_event record {record_id} with status callback data")
-            
-            # Step 2: Extract call_id from the updated record
-            updated_record = airtable_service.get_record_from_table(
-                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                record_id=record_id
-            )
-            
-            if updated_record and updated_record.get('fields', {}).get('call_id'):
-                call_id = updated_record['fields']['call_id']
-                logger.info(f"Extracted call_id: {call_id} from updated record")
-                
-                # Step 3: Fetch and update VAPI call data
-                if call_id and call_id.strip():
-                    logger.info(f"Triggering VAPI call data fetch for call_id: {call_id}")
-                    fetch_and_update_vapi_call_data(call_id)
-                else:
-                    logger.warning(f"Empty or invalid call_id: '{call_id}'")
-            else:
-                logger.warning(f"No call_id found in updated record {record_id}")
-        else:
-            logger.info(f"No new data to update for record {record_id}")
-        
+        # Step 3: If no match in either field, return early
+        logger.warning(f"No vapi_webhook_event record found matching CallSid: {call_sid} in either twilio_CallSid_ivr or twilio_CallSid fields")
         return '', 200
         
     except Exception as e:
