@@ -7,6 +7,7 @@ from twilio.twiml.voice_response import VoiceResponse, Gather
 from services.airtable_service import AirtableService
 from config import Config
 import json
+import requests
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -483,7 +484,7 @@ def status_callback():
         # Search for existing record with matching twilio_CallSid
         search_criteria = f"{{twilio_CallSid}}='{call_sid}'"
         records = airtable_service.search_records(
-            table_name=TABLE_ID_VAPI_WEBHOOK_EVENT,
+            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
             search_criteria=search_criteria
         )
         
@@ -516,12 +517,31 @@ def status_callback():
         if update_data:
             # Update the record in Airtable
             airtable_service.update_record_in_table(
-                table_name=TABLE_ID_VAPI_WEBHOOK_EVENT,
+                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
                 record_id=record_id,
                 data=update_data
             )
             
             logger.info(f"Successfully updated vapi_webhook_event record {record_id} with status callback data")
+            
+            # Step 2: Extract call_id from the updated record
+            updated_record = airtable_service.get_record_from_table(
+                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                record_id=record_id
+            )
+            
+            if updated_record and updated_record.get('fields', {}).get('call_id'):
+                call_id = updated_record['fields']['call_id']
+                logger.info(f"Extracted call_id: {call_id} from updated record")
+                
+                # Step 3: Fetch and update VAPI call data
+                if call_id and call_id.strip():
+                    logger.info(f"Triggering VAPI call data fetch for call_id: {call_id}")
+                    fetch_and_update_vapi_call_data(call_id)
+                else:
+                    logger.warning(f"Empty or invalid call_id: '{call_id}'")
+            else:
+                logger.warning(f"No call_id found in updated record {record_id}")
         else:
             logger.info(f"No new data to update for record {record_id}")
         
@@ -530,6 +550,100 @@ def status_callback():
     except Exception as e:
         logger.error(f"Error processing Twilio status callback: {str(e)}")
         return '', 200  # Always return 200 to Twilio even on error
+
+def fetch_and_update_vapi_call_data(call_id: str) -> bool:
+    """
+    Fetch call details from VAPI and update the Airtable record
+    
+    Args:
+        call_id: The VAPI call ID to fetch details for
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        logger.info(f"Fetching VAPI call details for call_id: {call_id}")
+        
+        # Fetch call details from VAPI
+        response = requests.get(
+            f"https://api.vapi.ai/call?id={call_id}",
+            headers={"Authorization": f"Bearer {Config.VAPI_API_KEY}"},
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"VAPI API error: {response.status_code} - {response.text}")
+            return False
+        
+        call_data_list = response.json()
+        if not call_data_list:
+            logger.warning(f"No call data found for call_id: {call_id}")
+            return False
+        
+        call_data = call_data_list[0]  # Expecting a list with one object
+        logger.info(f"Successfully fetched VAPI call data for call_id: {call_id}")
+        
+        # Find the Airtable record by call_id
+        airtable_service = AirtableService()
+        search_criteria = f"{{call_id}}='{call_id}'"
+        records = airtable_service.search_records(
+            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+            search_criteria=search_criteria
+        )
+        
+        if not records:
+            logger.warning(f"No vapi_webhook_event record found with call_id: {call_id}")
+            return False
+        
+        # Update the first matching record
+        record = records[0]
+        record_id = record['id']
+        
+        logger.info(f"Found matching vapi_webhook_event record: {record_id}")
+        
+        # Prepare update data with exact values from VAPI response
+        update_data = {
+            "endedAt": call_data.get("endedAt"),
+            "transcript": call_data.get("transcript"),
+            "recordingUrl": call_data.get("recordingUrl"),
+            "summary": call_data.get("summary"),
+            "status": call_data.get("status"),
+            "cost": call_data.get("cost"),
+            "endedReason": call_data.get("endedReason"),
+        }
+        
+        # Handle nested analysis fields
+        analysis = call_data.get("analysis", {})
+        if analysis:
+            update_data["analysis_summary"] = analysis.get("summary")
+            update_data["analysis_succes_evaluation"] = analysis.get("successEvaluation")
+        
+        # Handle JSON serialization for complex objects
+        if call_data.get("costBreakdown"):
+            update_data["costBreakdown"] = json.dumps(call_data["costBreakdown"])
+        
+        if call_data.get("variableValues"):
+            update_data["variableValues"] = json.dumps(call_data["variableValues"])
+        
+        # Remove None values to avoid overwriting with empty data
+        update_data = {k: v for k, v in update_data.items() if v is not None}
+        
+        if update_data:
+            # Update the record in Airtable
+            airtable_service.update_record_in_table(
+                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                record_id=record_id,
+                data=update_data
+            )
+            
+            logger.info(f"Successfully updated vapi_webhook_event record {record_id} with VAPI call data")
+            return True
+        else:
+            logger.info(f"No new VAPI data to update for record {record_id}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"Error fetching and updating VAPI call data for call_id {call_id}: {str(e)}")
+        return False
 
 @ivr_bp.route('/debug', methods=['GET'], strict_slashes=False)
 def ivr_debug():
