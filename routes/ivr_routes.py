@@ -475,7 +475,12 @@ def handle_selection():
             )
         
         # Transfer the call
-        dial = response.dial(caller_id=from_number)
+        dial = response.dial(
+            caller_id=from_number,
+            status_callback="https://siftly.onrender.com/ivr/status-callback",
+            status_callback_event=["initiated", "ringing", "answered", "completed"],
+            status_callback_method="POST"
+        )
         dial.number(transfer_number)
         
         logger.info(f"Transferring call from {from_number} to {transfer_number} with caller ID preserved")
@@ -491,6 +496,10 @@ def handle_selection():
 def status_callback():
     """Handle Twilio status callbacks and update existing vapi_webhook_event records"""
     try:
+        # Log all webhook data for debugging
+        logger.info("Webhook received:")
+        logger.info(dict(request.form))
+        
         # Log and parse values from request.form
         call_sid = request.form.get('CallSid')
         call_status = request.form.get('CallStatus')
