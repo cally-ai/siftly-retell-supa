@@ -324,7 +324,7 @@ def ivr_handler():
         
         # Build TwiML response
         response = VoiceResponse()
-        gather = Gather(num_digits=1, action='/ivr/handle-selection', method='POST')
+        gather = Gather(num_digits=1, action='/ivr/handle-selection', method='POST', timeout=10)
         
         # Add options to gather
         for option in ivr_config['options']:
@@ -511,6 +511,9 @@ def status_callback():
             logger.warning("No CallSid provided in status callback")
             return '', 200
         
+        # Initialize Airtable service
+        airtable_service = AirtableService()
+        
         # Handle different logic based on ParentCallSid presence and call status
         if parent_call_sid and parent_call_sid.strip() != '':
             # ParentCallSid has a value - handle VAPI call
@@ -682,7 +685,6 @@ def status_callback():
         
         # Look up the corresponding Airtable record in vapi_webhook_event table
         # where twilio_CallSid matches the incoming CallSid
-        airtable_service = AirtableService()
         
         # Search for existing record with matching twilio_CallSid
         records = airtable_service.search_records_in_table(
