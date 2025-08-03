@@ -308,6 +308,23 @@ def ivr_handler():
         to_number = request.form.get('To')
         call_sid = request.form.get('CallSid')
         
+        # Log IVR start time
+        from datetime import datetime
+        ivr_start_time = datetime.utcnow().isoformat() + 'Z'
+        logger.info(f"[IVR START] Call from {from_number} to {to_number} at {ivr_start_time}")
+        
+        # Save IVR start record in Airtable
+        ivr_service.airtable_service.create_record_in_table(
+            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+            data={
+                'twilio_CallSid_ivr': call_sid,
+                'twilio_From_ivr': from_number,
+                'twilio_To_ivr': to_number,
+                'twilio_StartTime_ivr': ivr_start_time,
+                'Direction_ivr': request.form.get('Direction')
+            }
+        )
+        
         logger.info(f"IVR call received - From: {from_number}, To: {to_number}, CallSid: {call_sid}")
         
         # Get IVR configuration
