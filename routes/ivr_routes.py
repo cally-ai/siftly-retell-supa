@@ -236,7 +236,7 @@ class IVRService:
         try:
             logger.info(f"Creating VAPI webhook event for caller: {from_number}")
             
-            # Try different field name variations
+            # Use IVR-specific field names
             event_data = {
                 'from_number': from_number,
                 'caller': [caller_id],
@@ -245,19 +245,19 @@ class IVRService:
             
             # Add Twilio Call SID if provided
             if call_sid:
-                event_data['twilio_CallSid'] = call_sid
+                event_data['twilio_CallSid_ivr'] = call_sid
                 logger.info(f"Adding Twilio Call SID: {call_sid}")
             
             # Add Twilio Start Time if provided
             if start_time:
-                event_data['twilio_StartTime'] = start_time
+                event_data['twilio_StartTime_ivr'] = start_time
                 logger.info(f"Adding Twilio Start Time: {start_time}")
             
-            # Add created_time with current datetime in ISO format
+            # Add transferred_time with current datetime in ISO format
             from datetime import datetime
-            created_time = datetime.utcnow().isoformat() + 'Z'
-            event_data['created_time'] = created_time
-            logger.info(f"Adding created_time: {created_time}")
+            transferred_time = datetime.utcnow().isoformat() + 'Z'
+            event_data['transferred_time'] = transferred_time
+            logger.info(f"Adding transferred_time: {transferred_time}")
             
             # Also try with different field names in case Airtable uses different naming
             # event_data = {
@@ -307,23 +307,6 @@ def ivr_handler():
         from_number = request.form.get('From')
         to_number = request.form.get('To')
         call_sid = request.form.get('CallSid')
-        
-        # Log IVR start time
-        from datetime import datetime
-        ivr_start_time = datetime.utcnow().isoformat() + 'Z'
-        logger.info(f"[IVR START] Call from {from_number} to {to_number} at {ivr_start_time}")
-        
-        # Save IVR start record in Airtable
-        ivr_service.airtable_service.create_record_in_table(
-            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-            data={
-                'twilio_CallSid_ivr': call_sid,
-                'twilio_From_ivr': from_number,
-                'twilio_To_ivr': to_number,
-                'twilio_StartTime_ivr': ivr_start_time,
-                'Direction_ivr': request.form.get('Direction')
-            }
-        )
         
         logger.info(f"IVR call received - From: {from_number}, To: {to_number}, CallSid: {call_sid}")
         
@@ -433,51 +416,21 @@ def handle_selection():
         
         logger.info(f"Caller record processed - ID: {caller_id}, Client: {ivr_config['client_id']}, Language: {selected_option['language_id']}")
         
-        # Update existing VAPI webhook event record
+        # Create VAPI webhook event record
         # Try different possible field names for start time
         start_time = request.form.get('StartTime') or request.form.get('CallStartTime') or request.form.get('start_time')
+        event_created = ivr_service.create_vapi_webhook_event(
+            from_number,
+            caller_id,
+            ivr_config['client_id'],
+            call_sid,  # Pass the Twilio Call SID
+            start_time  # Pass the Twilio Start Time
+        )
         
-        # Get call_sid for lookup
-        call_sid = request.form.get('CallSid')
-        
-        if not call_sid:
-            logger.warning(f"No CallSid provided for IVR transfer")
+        if not event_created:
+            logger.warning(f"Failed to create VAPI webhook event for: {from_number}")
         else:
-            logger.info(f"Looking up existing record with twilio_CallSid_ivr: {call_sid}")
-            
-            # Look up existing record by twilio_CallSid_ivr field
-            records = ivr_service.airtable_service.search_records_in_table(
-                table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                field="twilio_CallSid_ivr",
-                value=call_sid
-            )
-            
-            if not records:
-                logger.warning(f"No vapi_webhook_event record found with twilio_CallSid_ivr: {call_sid}")
-            else:
-                # Update the first matching record
-                record = records[0]
-                record_id = record['id']
-                
-                logger.info(f"Found matching vapi_webhook_event record for IVR transfer: {record_id}")
-                
-                # Prepare update data
-                update_data = {}
-                
-                # Add transferred_time
-                from datetime import datetime
-                transferred_time = datetime.utcnow().isoformat() + 'Z'
-                update_data['transferred_time'] = transferred_time
-                logger.info(f"Adding transferred_time: {transferred_time}")
-                
-                # Update the record in Airtable
-                ivr_service.airtable_service.update_record_in_table(
-                    table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                    record_id=record_id,
-                    data=update_data
-                )
-                
-                logger.info(f"Successfully updated vapi_webhook_event record {record_id} with transferred_time")
+            logger.info(f"VAPI webhook event created for caller {from_number}")
         
         # Build TwiML response
         response = VoiceResponse()
@@ -609,53 +562,6 @@ def status_callback():
                 return '', 200
         
         elif not parent_call_sid or parent_call_sid.strip() == '':
-            # Check if this is an "answered" call (IVR call start)
-            if call_status == "answered":
-                logger.info(f"ParentCallSid is empty and call status is 'answered' - Processing IVR call start")
-                
-                # Get IVR call start data
-                call_sid = request.form.get('CallSid')
-                call_status = request.form.get('CallStatus')
-                from_number = request.form.get('From')
-                to_number = request.form.get('To')
-                start_time = request.form.get('StartTime')
-                parent_call_sid = request.form.get('ParentCallSid')
-                direction = request.form.get('Direction')
-                
-                logger.info(f"IVR call start data - CallSid: {call_sid}, Status: {call_status}, From: {from_number}, To: {to_number}, StartTime: {start_time}, ParentCallSid: {parent_call_sid}, Direction: {direction}")
-                
-                if not call_sid:
-                    logger.warning("No CallSid provided in IVR call start")
-                    return '', 200
-                
-                # Create a new record in vapi_webhook_event table
-                ivr_call_data = {
-                    'twilio_CallSid_ivr': call_sid,
-                    'twilio_From_ivr': from_number,
-                    'twilio_To_ivr': to_number,
-                    'twilio_StartTime_ivr': start_time,
-                    'twilio_ParentCallSid_ivr': parent_call_sid,
-                    'Direction_ivr': direction
-                }
-                
-                # Remove None values to avoid issues
-                ivr_call_data = {k: v for k, v in ivr_call_data.items() if v is not None}
-                
-                logger.info(f"Creating IVR call start record with data: {ivr_call_data}")
-                
-                # Create the record in Airtable
-                new_record = airtable_service.create_record_in_table(
-                    table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                    data=ivr_call_data
-                )
-                
-                if new_record:
-                    logger.info(f"Successfully created IVR call start record: {new_record['id']}")
-                else:
-                    logger.error(f"Failed to create IVR call start record")
-                
-                return '', 200
-            
             # Handle IVR call completion (existing logic)
             logger.info(f"ParentCallSid is empty or not present - Processing IVR call completion")
             
