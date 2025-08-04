@@ -670,17 +670,23 @@ def status_callback():
                     logger.info(f"Branch 1: Matching VAPI record fields: {matching_vapi_fields}")
                     logger.info(f"Branch 1: vapi_webhook_event field value: {vapi_webhook_event}")
                     
-                    if vapi_webhook_event:
-                        logger.info(f"Branch 1: Linking vapi_webhook_event {vapi_webhook_event} from VAPI record {matching_vapi_record['id']}")
+                    # Get the vapi_webhook_event from our IVR record (the one we just updated)
+                    ivr_record_fields = record.get('fields', {})
+                    ivr_vapi_webhook_event = ivr_record_fields.get('vapi_webhook_event', [])
+                    
+                    logger.info(f"Branch 1: IVR record vapi_webhook_event: {ivr_vapi_webhook_event}")
+                    
+                    if ivr_vapi_webhook_event:
+                        logger.info(f"Branch 1: Updating VAPI record {matching_vapi_record['id']} with vapi_webhook_event from IVR record")
                         
-                        # Update our record with the vapi_webhook_event link
+                        # Update the VAPI record with the vapi_webhook_event from the IVR record
                         airtable_service.update_record_in_table(
                             table_name=Config.TABLE_ID_TWILIO_CALL,
-                            record_id=record_id,
-                            data={'vapi_webhook_event': vapi_webhook_event}
+                            record_id=matching_vapi_record['id'],
+                            data={'vapi_webhook_event': ivr_vapi_webhook_event}
                         )
                         
-                        logger.info(f"Branch 1: Successfully linked vapi_webhook_event to record {record_id}")
+                        logger.info(f"Branch 1: Successfully updated VAPI record {matching_vapi_record['id']} with vapi_webhook_event")
                         
                         # Now fetch VAPI details using the call_id from the linked vapi_webhook_event record
                         logger.info(f"Branch 1: Fetching VAPI details for linked vapi_webhook_event")
@@ -688,7 +694,7 @@ def status_callback():
                         # Get the vapi_webhook_event record to extract call_id
                         vapi_event_record = airtable_service.get_record_from_table(
                             table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                            record_id=vapi_webhook_event[0]  # Take the first linked record
+                            record_id=ivr_vapi_webhook_event[0]  # Take the first linked record
                         )
                         
                         if vapi_event_record:
@@ -730,7 +736,7 @@ def status_callback():
                                         # Update the vapi_webhook_event record with VAPI data
                                         airtable_service.update_record_in_table(
                                             table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                                            record_id=vapi_webhook_event[0],
+                                            record_id=ivr_vapi_webhook_event[0],
                                             data=vapi_update_data
                                         )
                                         
@@ -744,8 +750,7 @@ def status_callback():
                         else:
                             logger.warning(f"Branch 1: Could not retrieve vapi_webhook_event record")
                     else:
-                        logger.warning(f"Branch 1: No vapi_webhook_event found in matching VAPI record {matching_vapi_record['id']}")
-                        logger.warning(f"Branch 1: Available fields in VAPI record: {list(matching_vapi_fields.keys())}")
+                        logger.warning(f"Branch 1: No vapi_webhook_event found in IVR record to copy to VAPI record")
                 else:
                     logger.info(f"Branch 1: No matching VAPI record found within 5 seconds")
             else:
