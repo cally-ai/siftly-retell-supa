@@ -491,16 +491,6 @@ def status_callback():
             value=call_sid
         )
         
-        if not twilio_call_match:
-            logger.warning(f"No twilio_call record found for CallSid: {call_sid}")
-            return '', 200
-        
-        # Found matching record, update it with Twilio call details
-        record = twilio_call_match[0]
-        record_id = record['id']
-        
-        logger.info(f"Found twilio_call record {record_id} for CallSid: {call_sid}")
-        
         # Prepare update data with the specified fields
         update_data = {}
         
@@ -526,18 +516,109 @@ def status_callback():
         if call_details.forwarded_from:
             update_data['ForwardedFrom'] = call_details.forwarded_from
         
-        logger.info(f"Updating twilio_call record {record_id} with data: {update_data}")
+        # Branch 1: Found matching record
+        if twilio_call_match:
+            logger.info(f"Branch 1: Found twilio_call record for CallSid: {call_sid}")
+            record = twilio_call_match[0]
+            record_id = record['id']
+            
+            logger.info(f"Updating existing twilio_call record {record_id} with data: {update_data}")
+            
+            # Update the existing record in Airtable
+            if update_data:
+                airtable_service.update_record_in_table(
+                    table_name=Config.TABLE_ID_TWILIO_CALL,
+                    record_id=record_id,
+                    data=update_data
+                )
+                logger.info(f"Successfully updated twilio_call record {record_id} with Twilio call completion data")
+            else:
+                logger.warning(f"No update data prepared for twilio_call record {record_id}")
+            
+            # Now find child calls using ParentCallSid
+            logger.info(f"Branch 1: Searching for child calls with ParentCallSid: {call_sid}")
+            child_calls = client.calls.list(parent_call_sid=call_sid, limit=1)
+            
+            if child_calls:
+                child_call = child_calls[0]
+                child_call_sid = child_call.sid
+                logger.info(f"Branch 1: Found child call SID: {child_call_sid}")
+                
+                # Fetch child call details
+                child_call_details = client.calls(child_call_sid).fetch()
+                
+                # Prepare child call data
+                child_call_data = {
+                    'CallSid': child_call_details.sid,
+                    'Type': 'transfer',  # Set type to transfer
+                    'Parent': [record_id]  # Link to parent record
+                }
+                
+                # Add the same fields as parent
+                if child_call_details.account_sid:
+                    child_call_data['AccountSid'] = child_call_details.account_sid
+                if hasattr(child_call_details, 'from_') and child_call_details.from_:
+                    child_call_data['From'] = child_call_details.from_
+                if child_call_details.to:
+                    child_call_data['To'] = child_call_details.to
+                if child_call_details.direction:
+                    child_call_data['Direction'] = child_call_details.direction
+                if child_call_details.start_time:
+                    child_call_data['StartTime'] = child_call_details.start_time.isoformat()
+                if child_call_details.end_time:
+                    child_call_data['EndTime'] = child_call_details.end_time.isoformat()
+                if child_call_details.duration:
+                    child_call_data['Duration'] = child_call_details.duration
+                if child_call_details.answered_by:
+                    child_call_data['AnsweredBy'] = child_call_details.answered_by
+                if child_call_details.forwarded_from:
+                    child_call_data['ForwardedFrom'] = child_call_details.forwarded_from
+                
+                # Get vapi_webhook_event from parent record
+                parent_fields = record.get('fields', {})
+                vapi_webhook_event = parent_fields.get('vapi_webhook_event', [])
+                if vapi_webhook_event:
+                    child_call_data['vapi_webhook_event'] = vapi_webhook_event
+                    logger.info(f"Branch 1: Linking child call to same vapi_webhook_event: {vapi_webhook_event}")
+                
+                logger.info(f"Branch 1: Creating child call record with data: {child_call_data}")
+                
+                # Create child call record
+                child_record = airtable_service.create_record_in_table(
+                    table_name=Config.TABLE_ID_TWILIO_CALL,
+                    data=child_call_data
+                )
+                
+                if child_record:
+                    logger.info(f"Branch 1: Successfully created child call record: {child_record['id']}")
+                else:
+                    logger.error(f"Branch 1: Failed to create child call record")
+            else:
+                logger.info(f"Branch 1: No child calls found for ParentCallSid: {call_sid}")
         
-        # Update the record in Airtable
-        if update_data:
-            airtable_service.update_record_in_table(
-                table_name=Config.TABLE_ID_TWILIO_CALL,
-                record_id=record_id,
-                data=update_data
-            )
-            logger.info(f"Successfully updated twilio_call record {record_id} with Twilio call completion data")
+        # Branch 2: No matching record found
         else:
-            logger.warning(f"No update data prepared for twilio_call record {record_id}")
+            logger.info(f"Branch 2: No twilio_call record found for CallSid: {call_sid}, creating new record")
+            
+            # Create new record with the same fields
+            new_call_data = update_data.copy()
+            new_call_data['Type'] = 'vapi'  # Set type to vapi for new records
+            
+            logger.info(f"Branch 2: Creating new twilio_call record with data: {new_call_data}")
+            
+            # Create the new record in Airtable
+            if new_call_data:
+                new_record = airtable_service.create_record_in_table(
+                    table_name=Config.TABLE_ID_TWILIO_CALL,
+                    data=new_call_data
+                )
+                
+                if new_record:
+                    logger.info(f"Branch 2: Successfully created new twilio_call record: {new_record['id']}")
+                else:
+                    logger.error(f"Branch 2: Failed to create new twilio_call record")
+            else:
+                logger.warning(f"Branch 2: No data prepared for new twilio_call record")
         
         return '', 200
         

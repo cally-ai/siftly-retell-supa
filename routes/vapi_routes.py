@@ -657,12 +657,6 @@ def vapi_new_incoming_call_event():
         # Get the JSON data from the request
         data = request.get_json()
         
-        # Log the full webhook payload for debugging
-        logger.info("=== VAPI NEW INCOMING CALL EVENT WEBHOOK RECEIVED ===")
-        logger.info("Full webhook payload:")
-        logger.info(json.dumps(data, indent=2))
-        logger.info("=== END WEBHOOK PAYLOAD ===")
-        
         if not data:
             logger.warning("No JSON data received for new incoming call event")
             return jsonify({'error': 'No JSON data received'}), 400
@@ -679,13 +673,6 @@ def vapi_new_incoming_call_event():
         from_number = message.get('customer', {}).get('number', '')
         vapi_workflow_number = message.get('phoneNumber', {}).get('number', '')
         
-        # Log extracted data from webhook payload
-        logger.info("=== EXTRACTED FROM WEBHOOK PAYLOAD ===")
-        logger.info(f"call_id: {call_id}")
-        logger.info(f"from_number: {from_number}")
-        logger.info(f"vapi_workflow_number: {vapi_workflow_number}")
-        logger.info("=== END EXTRACTED DATA ===")
-        
         # Retrieve detailed call data from VAPI API
         vapi_service = VAPIWebhookService()
         call_data = vapi_service.get_vapi_call_data(call_id)
@@ -693,12 +680,6 @@ def vapi_new_incoming_call_event():
         if not call_data:
             logger.warning(f"Failed to retrieve call data for call_id: {call_id}")
             return jsonify({'error': 'Failed to retrieve call data'}), 500
-        
-        # Log VAPI API response data
-        logger.info("=== VAPI API RESPONSE DATA ===")
-        logger.info("Full VAPI API response:")
-        logger.info(json.dumps(call_data, indent=2))
-        logger.info("=== END VAPI API RESPONSE ===")
         
         # Save detailed call data to Airtable
         try:
@@ -759,6 +740,8 @@ def vapi_new_incoming_call_event():
                 except Exception as link_error:
                     logger.error(f"Error finding VAPI workflow for linking: {link_error}")
                     # Continue without workflow link if lookup fails
+            
+            logger.info(f"VAPI creating record with fields: {airtable_fields}")
             
             # Check for existing records that match our criteria
             # Use the from_number that was already extracted from the webhook payload
@@ -863,42 +846,6 @@ def vapi_new_incoming_call_event():
             
             if record:
                 logger.info(f"Successfully created VAPI webhook event record: {record.get('id')}")
-                
-                # Step 7: Create twilio_call record
-                # Extract CallSid from VAPI API response (most likely location)
-                call_sid = call_data.get('CallSid')
-                
-                # Log CallSid extraction attempt
-                logger.info("=== TWILIO CALL RECORD CREATION ===")
-                logger.info(f"Attempting to extract CallSid from VAPI API response...")
-                logger.info(f"CallSid found: {call_sid}")
-                logger.info(f"All available keys in call_data: {list(call_data.keys())}")
-                
-                if call_sid:
-                    logger.info(f"Creating twilio_call record for CallSid: {call_sid}")
-                    
-                    # Create twilio_call record
-                    twilio_call_data = {
-                        'CallSid': call_sid,  # Primary field
-                        'Type': 'vapi'  # Select field
-                    }
-                    
-                    logger.info(f"Creating twilio_call record with data: {twilio_call_data}")
-                    
-                    twilio_call_record = vapi_service.airtable_service.create_record_in_table(
-                        table_name=Config.TABLE_ID_TWILIO_CALL,
-                        data=twilio_call_data
-                    )
-                    
-                    if twilio_call_record:
-                        logger.info(f"Successfully created twilio_call record: {twilio_call_record['id']} for CallSid: {call_sid}")
-                    else:
-                        logger.error(f"Failed to create twilio_call record for CallSid: {call_sid}")
-                else:
-                    logger.info("No CallSid found in VAPI API response, skipping twilio_call record creation")
-                    logger.info(f"VAPI API response keys: {list(call_data.keys())}")
-                
-                logger.info("=== END TWILIO CALL RECORD CREATION ===")
             else:
                 logger.warning("Failed to save detailed call data to Airtable")
                 
