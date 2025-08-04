@@ -64,28 +64,27 @@ async def preload_cache():
     success_count = 0
     error_count = 0
     
-    # Create a single ThreadPoolExecutor for the entire process
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        for number in to_numbers:
-            try:
-                logger.info(f"Preloading cache for: {number}")
-                
-                # 1. Get dynamic variables data (existing functionality)
-                dynamic_data = await webhook_service._get_customer_data_async(number)
-                
-                if dynamic_data:
-                    # Cache dynamic variables with phone number as key
-                    await redis_client.set(number, json.dumps(dynamic_data), ex=10800)
-                    logger.info(f"✅ Cached dynamic variables: {number}")
-                else:
-                    logger.warning(f"⚠️ No dynamic variables found for: {number}")
-                
-                # 2. Get IVR configuration data (new functionality)
-                from routes.ivr_routes import IVRService
-                ivr_service = IVRService()
-                
-                # Use the same executor for sync method calls
+    for number in to_numbers:
+        try:
+            logger.info(f"Preloading cache for: {number}")
+            
+            # 1. Get dynamic variables data (existing functionality)
+            dynamic_data = await webhook_service._get_customer_data_async(number)
+            
+            if dynamic_data:
+                # Cache dynamic variables with phone number as key
+                await redis_client.set(number, json.dumps(dynamic_data), ex=10800)
+                logger.info(f"✅ Cached dynamic variables: {number}")
+            else:
+                logger.warning(f"⚠️ No dynamic variables found for: {number}")
+            
+            # 2. Get IVR configuration data (new functionality)
+            from routes.ivr_routes import IVRService
+            ivr_service = IVRService()
+            
+            # Use ThreadPoolExecutor for sync method calls
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
                 ivr_config = executor.submit(ivr_service.get_ivr_configuration, number).result()
                 
                 if ivr_config:
@@ -116,12 +115,12 @@ async def preload_cache():
                                 logger.info(f"✅ Cached transfer number for language {language_1_id}: {transfer_number}")
                 else:
                     logger.warning(f"⚠️ No IVR config found for: {number}")
+            
+            success_count += 1
                 
-                success_count += 1
-                    
-            except Exception as e:
-                logger.error(f"❌ Error caching {number}: {e}")
-                error_count += 1
+        except Exception as e:
+            logger.error(f"❌ Error caching {number}: {e}")
+            error_count += 1
     
     logger.info(f"Cache preload complete: {success_count} successful, {error_count} errors")
 
