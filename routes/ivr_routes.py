@@ -666,25 +666,36 @@ def status_callback():
                             record_type = record_fields.get('Type')
                             record_end_time = record_fields.get('EndTime')
                             
+                            logger.info(f"Branch 2: Checking record {record['id']}: Type='{record_type}', EndTime='{record_end_time}'")
+                            
                             # Check if it's an IVR record
-                            if record_type == 'ivr' and record_end_time:
-                                try:
-                                    # Parse the end times for comparison
-                                    new_end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-                                    record_end_dt = datetime.fromisoformat(record_end_time.replace('Z', '+00:00'))
+                            if record_type == 'ivr':
+                                logger.info(f"Branch 2: Record {record['id']} is IVR type")
+                                
+                                if record_end_time:
+                                    try:
+                                        # Parse the end times for comparison
+                                        new_end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                                        record_end_dt = datetime.fromisoformat(record_end_time.replace('Z', '+00:00'))
+                                        
+                                        # Calculate time difference
+                                        time_diff = abs((new_end_dt - record_end_dt).total_seconds())
+                                        
+                                        logger.info(f"Branch 2: Comparing with record {record['id']}: new_end={new_end_dt}, record_end={record_end_dt}, time_diff={time_diff}s")
+                                        
+                                        # Check if within 5 seconds
+                                        if time_diff <= 5:
+                                            matching_ivr_records.append(record)
+                                            logger.info(f"Branch 2: Found matching IVR record {record['id']} (time_diff={time_diff}s)")
+                                        else:
+                                            logger.info(f"Branch 2: Record {record['id']} rejected - time_diff={time_diff}s > 5s")
                                     
-                                    # Calculate time difference
-                                    time_diff = abs((new_end_dt - record_end_dt).total_seconds())
-                                    
-                                    logger.info(f"Branch 2: Comparing with record {record['id']}: time_diff={time_diff}s")
-                                    
-                                    # Check if within 5 seconds
-                                    if time_diff <= 5:
-                                        matching_ivr_records.append(record)
-                                        logger.info(f"Branch 2: Found matching IVR record {record['id']} (time_diff={time_diff}s)")
-                                    
-                                except Exception as e:
-                                    logger.warning(f"Branch 2: Error parsing EndTime for record {record['id']}: {e}")
+                                    except Exception as e:
+                                        logger.warning(f"Branch 2: Error parsing EndTime for record {record['id']}: {e}")
+                                else:
+                                    logger.info(f"Branch 2: Record {record['id']} rejected - missing EndTime field")
+                            else:
+                                logger.info(f"Branch 2: Record {record['id']} rejected - Type='{record_type}' (not 'ivr')")
                         
                         # If we found a matching IVR record, link the vapi_webhook_event
                         if matching_ivr_records:
