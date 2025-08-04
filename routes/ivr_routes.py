@@ -618,6 +618,12 @@ def status_callback():
         else:
             logger.info(f"Branch 2: No twilio_call record found for CallSid: {call_sid}, creating new record")
             
+            # Add 8-second delay for Branch 2 processing
+            logger.info(f"Branch 2: Adding 8-second delay before processing...")
+            import time
+            time.sleep(8)
+            logger.info(f"Branch 2: Delay completed, proceeding with record creation")
+            
             # Create new record with the same fields
             new_call_data = update_data.copy()
             new_call_data['Type'] = 'vapi'  # Set type to vapi for new records
