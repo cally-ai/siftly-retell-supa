@@ -80,6 +80,7 @@ async def preload_cache():
             
             # 2. Get IVR configuration data (new functionality)
             from routes.ivr_routes import IVRService
+            from services.redis_client import is_redis_configured
             ivr_service = IVRService()
             
             # Force fresh Airtable lookup by bypassing cache
@@ -89,14 +90,21 @@ async def preload_cache():
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 # Temporarily disable Redis to force Airtable lookup
-                original_redis_configured = ivr_service.airtable_service.is_redis_configured
-                ivr_service.airtable_service.is_redis_configured = lambda: False
+                original_redis_configured = is_redis_configured
+                
+                # Create a mock function that always returns False
+                def mock_redis_disabled():
+                    return False
+                
+                # Temporarily replace the function
+                import services.redis_client
+                services.redis_client.is_redis_configured = mock_redis_disabled
                 
                 try:
                     ivr_config = executor.submit(ivr_service.get_ivr_configuration, number).result()
                 finally:
-                    # Restore Redis configuration
-                    ivr_service.airtable_service.is_redis_configured = original_redis_configured
+                    # Restore the original function
+                    services.redis_client.is_redis_configured = original_redis_configured
             
             if ivr_config:
                 # Cache IVR config with ivr_config_ prefix
