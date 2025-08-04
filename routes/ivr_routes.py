@@ -505,8 +505,8 @@ def status_callback():
         if hasattr(call_details, 'from_') and call_details.from_:
             from_number = call_details.from_
             logger.info(f"Got From from call_details.from_: {from_number}")
-        elif hasattr(call_details, 'from') and call_details.from:
-            from_number = call_details.from
+        elif hasattr(call_details, 'from') and getattr(call_details, 'from', None):
+            from_number = getattr(call_details, 'from')
             logger.info(f"Got From from call_details.from: {from_number}")
         else:
             # Fallback to webhook payload
@@ -580,8 +580,8 @@ def status_callback():
                 if hasattr(child_call_details, 'from_') and child_call_details.from_:
                     child_from_number = child_call_details.from_
                     logger.info(f"Child call - Got From from call_details.from_: {child_from_number}")
-                elif hasattr(child_call_details, 'from') and child_call_details.from:
-                    child_from_number = child_call_details.from
+                elif hasattr(child_call_details, 'from') and getattr(child_call_details, 'from', None):
+                    child_from_number = getattr(child_call_details, 'from')
                     logger.info(f"Child call - Got From from call_details.from: {child_from_number}")
                 else:
                     logger.warning("Child call - Could not extract From field from call details")
