@@ -119,20 +119,24 @@ async def preload_cache():
                     for option in ivr_config.get('options', []):
                         language_id = option.get('language_id')
                         if language_id:
-                            transfer_number = executor.submit(ivr_service.get_transfer_number, language_id).result()
-                            if transfer_number:
-                                transfer_cache_key = f"transfer_number_{language_id}"
-                                await redis_client.set(transfer_cache_key, transfer_number, ex=10800)
-                                logger.info(f"✅ Cached transfer number for language {language_id}: {transfer_number}")
+                            # Create a new executor for each transfer number lookup
+                            with concurrent.futures.ThreadPoolExecutor() as transfer_executor:
+                                transfer_number = transfer_executor.submit(ivr_service.get_transfer_number, language_id).result()
+                                if transfer_number:
+                                    transfer_cache_key = f"transfer_number_{language_id}"
+                                    await redis_client.set(transfer_cache_key, transfer_number, ex=10800)
+                                    logger.info(f"✅ Cached transfer number for language {language_id}: {transfer_number}")
                 else:
                     # Single language setup - preload transfer number for language_1
                     language_1_id = ivr_config.get('language_1_id')
                     if language_1_id:
-                        transfer_number = executor.submit(ivr_service.get_transfer_number, language_1_id).result()
-                        if transfer_number:
-                            transfer_cache_key = f"transfer_number_{language_1_id}"
-                            await redis_client.set(transfer_cache_key, transfer_number, ex=10800)
-                            logger.info(f"✅ Cached transfer number for language {language_1_id}: {transfer_number}")
+                        # Create a new executor for transfer number lookup
+                        with concurrent.futures.ThreadPoolExecutor() as transfer_executor:
+                            transfer_number = transfer_executor.submit(ivr_service.get_transfer_number, language_1_id).result()
+                            if transfer_number:
+                                transfer_cache_key = f"transfer_number_{language_1_id}"
+                                await redis_client.set(transfer_cache_key, transfer_number, ex=10800)
+                                logger.info(f"✅ Cached transfer number for language {language_1_id}: {transfer_number}")
             else:
                 logger.warning(f"⚠️ No IVR config found for: {number}")
             
