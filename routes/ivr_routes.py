@@ -77,6 +77,7 @@ class IVRService:
                 'client_id': fields.get('client', []),
                 'twilio_voice': fields.get('twilio_voice'),
                 'ivr_setup': fields.get('ivr_setup', True),  # Default to True for backward compatibility
+                'audio_file_ivr': fields.get('audio_file_ivr'),  # Main IVR audio file
                 'options': []
             }
             
@@ -98,6 +99,7 @@ class IVRService:
                         # Get corresponding language code and reply
                         language_code_field = f"twilio_language_code_{option_num}"
                         reply_field = f"reply_{option_num}"
+                        audio_reply_field = f"audio_file_reply_{option_num}"  # New audio reply field
                         language_linked_field = f"language_{option_num}"
                         
                         option_config = {
@@ -105,6 +107,7 @@ class IVRService:
                             'text': field_value,
                             'language_code': fields.get(language_code_field),
                             'reply': fields.get(reply_field),
+                            'audio_reply': fields.get(audio_reply_field),  # Audio file for reply
                             'language_id': fields.get(language_linked_field, [])
                         }
                         
@@ -400,15 +403,21 @@ def ivr_handler():
             response = VoiceResponse()
             gather = Gather(num_digits=1, action='/ivr/handle-selection', method='POST', timeout=10)
             
-            # Add options to gather
-            for option in ivr_config['options']:
-                if option['text'] and option['language_code'] and ivr_config['twilio_voice']:
-                    logger.info(f"Adding IVR option {option['number']}: '{option['text']}' in {option['language_code']}")
-                    gather.say(
-                        option['text'],
-                        voice=ivr_config['twilio_voice'],
-                        language=option['language_code']
-                    )
+            # Check if we have an audio file for the IVR menu
+            if ivr_config.get('audio_file_ivr'):
+                logger.info(f"Using audio file for IVR menu: {ivr_config['audio_file_ivr']}")
+                gather.play(ivr_config['audio_file_ivr'])
+            else:
+                logger.info(f"No audio file found, using text-to-speech for IVR menu")
+                # Fallback to text-to-speech if no audio file
+                for option in ivr_config['options']:
+                    if option['text'] and option['language_code'] and ivr_config['twilio_voice']:
+                        logger.info(f"Adding IVR option {option['number']}: '{option['text']}' in {option['language_code']}")
+                        gather.say(
+                            option['text'],
+                            voice=ivr_config['twilio_voice'],
+                            language=option['language_code']
+                        )
             
             # Add fallback if no digits pressed
             response.append(gather)
@@ -561,9 +570,12 @@ def handle_selection():
         # Build TwiML response
         response = VoiceResponse()
         
-        # Say the reply message if configured
-        if selected_option['reply'] and selected_option['language_code'] and ivr_config['twilio_voice']:
-            logger.info(f"Playing reply message: '{selected_option['reply']}' in {selected_option['language_code']}")
+        # Play the reply message if configured
+        if selected_option.get('audio_reply'):
+            logger.info(f"Playing audio reply file: {selected_option['audio_reply']}")
+            response.play(selected_option['audio_reply'])
+        elif selected_option['reply'] and selected_option['language_code'] and ivr_config['twilio_voice']:
+            logger.info(f"Playing text reply message: '{selected_option['reply']}' in {selected_option['language_code']}")
             response.say(
                 selected_option['reply'],
                 voice=ivr_config['twilio_voice'],
