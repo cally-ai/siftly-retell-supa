@@ -499,8 +499,25 @@ def status_callback():
             update_data['CallSid'] = call_details.sid
         if call_details.account_sid:
             update_data['AccountSid'] = call_details.account_sid
+        
+        # Try to get From field from call details, with debugging
+        from_number = None
         if hasattr(call_details, 'from_') and call_details.from_:
-            update_data['From'] = call_details.from_
+            from_number = call_details.from_
+            logger.info(f"Got From from call_details.from_: {from_number}")
+        elif hasattr(call_details, 'from') and call_details.from:
+            from_number = call_details.from
+            logger.info(f"Got From from call_details.from: {from_number}")
+        else:
+            # Fallback to webhook payload
+            from_number = request.form.get('From')
+            logger.info(f"Got From from webhook payload: {from_number}")
+        
+        if from_number:
+            update_data['From'] = from_number
+        else:
+            logger.warning("Could not extract From field from any source")
+        
         if call_details.to:
             update_data['To'] = call_details.to
         if call_details.direction:
@@ -557,8 +574,21 @@ def status_callback():
                 # Add the same fields as parent
                 if child_call_details.account_sid:
                     child_call_data['AccountSid'] = child_call_details.account_sid
+                
+                # Try to get From field from child call details, with debugging
+                child_from_number = None
                 if hasattr(child_call_details, 'from_') and child_call_details.from_:
-                    child_call_data['From'] = child_call_details.from_
+                    child_from_number = child_call_details.from_
+                    logger.info(f"Child call - Got From from call_details.from_: {child_from_number}")
+                elif hasattr(child_call_details, 'from') and child_call_details.from:
+                    child_from_number = child_call_details.from
+                    logger.info(f"Child call - Got From from call_details.from: {child_from_number}")
+                else:
+                    logger.warning("Child call - Could not extract From field from call details")
+                
+                if child_from_number:
+                    child_call_data['From'] = child_from_number
+                
                 if child_call_details.to:
                     child_call_data['To'] = child_call_details.to
                 if child_call_details.direction:
