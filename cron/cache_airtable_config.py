@@ -68,17 +68,55 @@ async def preload_cache():
         try:
             logger.info(f"Preloading cache for: {number}")
             
-            # Get data from Airtable
-            data = await webhook_service._get_customer_data_async(number)
+            # 1. Get dynamic variables data (existing functionality)
+            dynamic_data = await webhook_service._get_customer_data_async(number)
             
-            if data:
-                # Cache in Redis with 3-hour TTL
-                await redis_client.set(number, json.dumps(data), ex=10800)
-                logger.info(f"✅ Cached: {number}")
-                success_count += 1
+            if dynamic_data:
+                # Cache dynamic variables with phone number as key
+                await redis_client.set(number, json.dumps(dynamic_data), ex=10800)
+                logger.info(f"✅ Cached dynamic variables: {number}")
             else:
-                logger.warning(f"⚠️ No data found for: {number}")
-                error_count += 1
+                logger.warning(f"⚠️ No dynamic variables found for: {number}")
+            
+            # 2. Get IVR configuration data (new functionality)
+            from routes.ivr_routes import IVRService
+            ivr_service = IVRService()
+            
+            # Use ThreadPoolExecutor to run sync method in async context
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                ivr_config = executor.submit(lambda: ivr_service.get_ivr_configuration(number)).result()
+            
+            if ivr_config:
+                # Cache IVR config with ivr_config_ prefix
+                cache_key = f"ivr_config_{number}"
+                await redis_client.set(cache_key, json.dumps(ivr_config), ex=10800)
+                logger.info(f"✅ Cached IVR config: {number}")
+                
+                # 3. Preload transfer numbers for all languages in IVR config
+                if ivr_config.get('ivr_setup'):
+                    # Multi-language setup - preload transfer numbers for all options
+                    for option in ivr_config.get('options', []):
+                        language_id = option.get('language_id')
+                        if language_id:
+                            transfer_number = executor.submit(lambda: ivr_service.get_transfer_number(language_id)).result()
+                            if transfer_number:
+                                transfer_cache_key = f"transfer_number_{language_id}"
+                                await redis_client.set(transfer_cache_key, transfer_number, ex=10800)
+                                logger.info(f"✅ Cached transfer number for language {language_id}: {transfer_number}")
+                else:
+                    # Single language setup - preload transfer number for language_1
+                    language_1_id = ivr_config.get('language_1_id')
+                    if language_1_id:
+                        transfer_number = executor.submit(lambda: ivr_service.get_transfer_number(language_1_id)).result()
+                        if transfer_number:
+                            transfer_cache_key = f"transfer_number_{language_1_id}"
+                            await redis_client.set(transfer_cache_key, transfer_number, ex=10800)
+                            logger.info(f"✅ Cached transfer number for language {language_1_id}: {transfer_number}")
+            else:
+                logger.warning(f"⚠️ No IVR config found for: {number}")
+            
+            success_count += 1
                 
         except Exception as e:
             logger.error(f"❌ Error caching {number}: {e}")
