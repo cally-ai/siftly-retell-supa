@@ -2,6 +2,7 @@
 IVR Routes for handling Twilio IVR calls with dynamic language options
 """
 import logging
+import time
 from flask import Blueprint, request, Response
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from services.airtable_service import AirtableService
@@ -54,6 +55,7 @@ class IVRService:
                 'client_number': fields.get('client_ivr_twilio_number'),
                 'client_id': fields.get('client', []),
                 'twilio_voice': fields.get('twilio_voice'),
+                'ivr_setup': fields.get('ivr_setup', True),  # Default to True for backward compatibility
                 'options': []
             }
             
@@ -61,33 +63,49 @@ class IVRService:
             if config['client_id']:
                 config['client_id'] = config['client_id'][0]
             
-            # Count and extract options
-            option_count = 0
-            for field_name, field_value in fields.items():
-                if field_name.startswith('option_') and field_value:
-                    option_num = field_name.split('_')[1]
-                    option_count += 1
-                    
-                    # Get corresponding language code and reply
-                    language_code_field = f"twilio_language_code_{option_num}"
-                    reply_field = f"reply_{option_num}"
-                    language_linked_field = f"language_{option_num}"
-                    
-                    option_config = {
-                        'number': option_num,
-                        'text': field_value,
-                        'language_code': fields.get(language_code_field),
-                        'reply': fields.get(reply_field),
-                        'language_id': fields.get(language_linked_field, [])
-                    }
-                    
-                    # Extract language_id (first linked record)
-                    if option_config['language_id']:
-                        option_config['language_id'] = option_config['language_id'][0]
-                    
-                    config['options'].append(option_config)
+            # Check if IVR setup is enabled
+            if config['ivr_setup']:
+                logger.info(f"IVR setup enabled for number {twilio_number}, processing multiple language options")
+                
+                # Count and extract options
+                option_count = 0
+                for field_name, field_value in fields.items():
+                    if field_name.startswith('option_') and field_value:
+                        option_num = field_name.split('_')[1]
+                        option_count += 1
+                        
+                        # Get corresponding language code and reply
+                        language_code_field = f"twilio_language_code_{option_num}"
+                        reply_field = f"reply_{option_num}"
+                        language_linked_field = f"language_{option_num}"
+                        
+                        option_config = {
+                            'number': option_num,
+                            'text': field_value,
+                            'language_code': fields.get(language_code_field),
+                            'reply': fields.get(reply_field),
+                            'language_id': fields.get(language_linked_field, [])
+                        }
+                        
+                        # Extract language_id (first linked record)
+                        if option_config['language_id']:
+                            option_config['language_id'] = option_config['language_id'][0]
+                        
+                        config['options'].append(option_config)
+                
+                logger.info(f"Found IVR configuration with {len(config['options'])} options for number {twilio_number}")
+            else:
+                logger.info(f"IVR setup disabled for number {twilio_number}, using single language configuration")
+                
+                # For single language setup, get language_1
+                language_1_id = fields.get('language_1', [])
+                if language_1_id:
+                    config['language_1_id'] = language_1_id[0]  # Extract first linked record
+                    logger.info(f"Single language configuration found with language_1_id: {config['language_1_id']}")
+                else:
+                    logger.error(f"No language_1 configured for single language setup: {twilio_number}")
+                    return None
             
-            logger.info(f"Found IVR configuration with {len(config['options'])} options for number {twilio_number}")
             return config
             
         except Exception as e:
@@ -311,28 +329,87 @@ def ivr_handler():
             response.say("Sorry, this number is not configured for IVR.", voice='alice')
             return Response(str(response), mimetype='text/xml')
         
-        logger.info(f"IVR configuration found - Client: {ivr_config['client_id']}, Voice: {ivr_config['twilio_voice']}, Options: {len(ivr_config['options'])}")
+        logger.info(f"IVR configuration found - Client: {ivr_config['client_id']}, Voice: {ivr_config['twilio_voice']}, IVR Setup: {ivr_config['ivr_setup']}")
         
-        # Build TwiML response
-        response = VoiceResponse()
-        gather = Gather(num_digits=1, action='/ivr/handle-selection', method='POST', timeout=10)
-        
-        # Add options to gather
-        for option in ivr_config['options']:
-            if option['text'] and option['language_code'] and ivr_config['twilio_voice']:
-                logger.info(f"Adding IVR option {option['number']}: '{option['text']}' in {option['language_code']}")
-                gather.say(
-                    option['text'],
-                    voice=ivr_config['twilio_voice'],
-                    language=option['language_code']
-                )
-        
-        # Add fallback if no digits pressed
-        response.append(gather)
-        response.say("No selection made. Goodbye.", voice='alice')
-        
-        logger.info(f"Generated IVR TwiML with {len(ivr_config['options'])} options for caller {from_number}")
-        return Response(str(response), mimetype='text/xml')
+        # Check if IVR setup is enabled
+        if ivr_config['ivr_setup']:
+            logger.info(f"IVR setup enabled, generating language selection menu")
+            
+            # Build TwiML response for language selection
+            response = VoiceResponse()
+            gather = Gather(num_digits=1, action='/ivr/handle-selection', method='POST', timeout=10)
+            
+            # Add options to gather
+            for option in ivr_config['options']:
+                if option['text'] and option['language_code'] and ivr_config['twilio_voice']:
+                    logger.info(f"Adding IVR option {option['number']}: '{option['text']}' in {option['language_code']}")
+                    gather.say(
+                        option['text'],
+                        voice=ivr_config['twilio_voice'],
+                        language=option['language_code']
+                    )
+            
+            # Add fallback if no digits pressed
+            response.append(gather)
+            response.say("No selection made. Goodbye.", voice='alice')
+            
+            logger.info(f"Generated IVR TwiML with {len(ivr_config['options'])} options for caller {from_number}")
+            return Response(str(response), mimetype='text/xml')
+            
+        else:
+            logger.info(f"IVR setup disabled, directly transferring call to single language configuration")
+            
+            # For single language setup, directly transfer the call
+            language_1_id = ivr_config.get('language_1_id')
+            if not language_1_id:
+                logger.error(f"No language_1_id found in single language configuration")
+                response = VoiceResponse()
+                response.say("Sorry, language configuration not found.", voice='alice')
+                return Response(str(response), mimetype='text/xml')
+            
+            # Get transfer number for the single language
+            transfer_number = ivr_service.get_transfer_number(language_1_id)
+            
+            if not transfer_number:
+                logger.error(f"No transfer number found for language: {language_1_id}")
+                response = VoiceResponse()
+                response.say("Sorry, transfer number not configured.", voice='alice')
+                return Response(str(response), mimetype='text/xml')
+            
+            logger.info(f"Single language transfer - From: {from_number}, To: {transfer_number}, Language: {language_1_id}")
+            
+            # Find or create caller record
+            caller_id = ivr_service.find_or_create_caller(from_number, ivr_config['client_id'], language_1_id)
+            
+            if not caller_id:
+                logger.error(f"Failed to find or create caller record for {from_number}")
+                response = VoiceResponse()
+                response.say("Sorry, caller record could not be created.", voice='alice')
+                return Response(str(response), mimetype='text/xml')
+            
+            # Create VAPI webhook event and Twilio call records
+            event_created = ivr_service.create_vapi_webhook_event(
+                from_number,
+                caller_id,
+                ivr_config['client_id'],
+                call_sid
+            )
+            
+            if not event_created:
+                logger.error(f"Failed to create VAPI webhook event for {from_number}")
+                response = VoiceResponse()
+                response.say("Sorry, call setup failed.", voice='alice')
+                return Response(str(response), mimetype='text/xml')
+            
+            # Transfer the call
+            response = VoiceResponse()
+            response.dial(
+                Number(transfer_number),
+                caller_id=from_number  # Preserve original caller ID
+            )
+            
+            logger.info(f"Successfully transferred call from {from_number} to {transfer_number} for single language setup")
+            return Response(str(response), mimetype='text/xml')
         
     except Exception as e:
         logger.error(f"Error in IVR handler: {e}")
@@ -529,6 +606,12 @@ def status_callback():
         # Branch 1: Found matching record
         if twilio_call_match:
             logger.info(f"Branch 1: Found twilio_call record for CallSid: {call_sid}")
+            
+            # Add 15-second delay for Branch 1
+            logger.info(f"Branch 1: Starting 15-second delay before processing...")
+            time.sleep(15)
+            logger.info(f"Branch 1: 15-second delay completed, continuing with processing...")
+            
             record = twilio_call_match[0]
             record_id = record['id']
             
