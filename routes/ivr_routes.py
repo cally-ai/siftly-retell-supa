@@ -619,9 +619,9 @@ def status_callback():
             logger.info(f"Branch 2: No twilio_call record found for CallSid: {call_sid}, creating new record")
             
             # Add 8-second delay for Branch 2 processing
-            logger.info(f"Branch 2: Adding 8-second delay before processing...")
+            logger.info(f"Branch 2: Adding 15-second delay before processing...")
             import time
-            time.sleep(8)
+            time.sleep(15)
             logger.info(f"Branch 2: Delay completed, proceeding with record creation")
             
             # Create new record with the same fields
@@ -662,6 +662,11 @@ def status_callback():
                         matching_ivr_records = []
                         
                         for record in matching_records:
+                            # Skip the current record we just created
+                            if record['id'] == new_record['id']:
+                                logger.info(f"Branch 2: Skipping current record {record['id']} (just created)")
+                                continue
+                                
                             record_fields = record.get('fields', {})
                             record_type = record_fields.get('Type')
                             record_end_time = record_fields.get('EndTime')
