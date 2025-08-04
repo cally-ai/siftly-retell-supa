@@ -667,6 +667,9 @@ def status_callback():
                     matching_vapi_fields = matching_vapi_record.get('fields', {})
                     vapi_webhook_event = matching_vapi_fields.get('vapi_webhook_event', [])
                     
+                    logger.info(f"Branch 1: Matching VAPI record fields: {matching_vapi_fields}")
+                    logger.info(f"Branch 1: vapi_webhook_event field value: {vapi_webhook_event}")
+                    
                     if vapi_webhook_event:
                         logger.info(f"Branch 1: Linking vapi_webhook_event {vapi_webhook_event} from VAPI record {matching_vapi_record['id']}")
                         
@@ -742,6 +745,7 @@ def status_callback():
                             logger.warning(f"Branch 1: Could not retrieve vapi_webhook_event record")
                     else:
                         logger.warning(f"Branch 1: No vapi_webhook_event found in matching VAPI record {matching_vapi_record['id']}")
+                        logger.warning(f"Branch 1: Available fields in VAPI record: {list(matching_vapi_fields.keys())}")
                 else:
                     logger.info(f"Branch 1: No matching VAPI record found within 5 seconds")
             else:
