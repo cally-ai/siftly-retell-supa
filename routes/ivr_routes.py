@@ -532,6 +532,47 @@ def status_callback():
             record = twilio_call_match[0]
             record_id = record['id']
             
+            # Check if the IVR record has vapi_webhook_event, if not, we need to create one
+            record_fields = record.get('fields', {})
+            existing_vapi_webhook_event = record_fields.get('vapi_webhook_event', [])
+            
+            if not existing_vapi_webhook_event:
+                logger.info(f"Branch 1: IVR record missing vapi_webhook_event, creating one")
+                
+                # Create a new vapi_webhook_event record
+                vapi_event_data = {
+                    'from_number': update_data.get('From'),
+                    'transferred_time': datetime.utcnow().isoformat() + 'Z'
+                }
+                
+                # Try to get caller and client from the record if available
+                if hasattr(record, 'caller') and record.caller:
+                    vapi_event_data['caller'] = [record.caller]
+                if hasattr(record, 'client') and record.client:
+                    vapi_event_data['client'] = [record.client]
+                
+                vapi_event_record = airtable_service.create_record_in_table(
+                    table_name="vapi_webhook_event",
+                    data=vapi_event_data
+                )
+                
+                if vapi_event_record:
+                    logger.info(f"Branch 1: Created vapi_webhook_event record: {vapi_event_record['id']}")
+                    
+                    # Update the IVR record with the vapi_webhook_event link
+                    airtable_service.update_record_in_table(
+                        table_name=Config.TABLE_ID_TWILIO_CALL,
+                        record_id=record_id,
+                        data={'vapi_webhook_event': [vapi_event_record['id']]}
+                    )
+                    
+                    logger.info(f"Branch 1: Updated IVR record with vapi_webhook_event link")
+                    existing_vapi_webhook_event = [vapi_event_record['id']]
+                else:
+                    logger.error(f"Branch 1: Failed to create vapi_webhook_event record")
+            else:
+                logger.info(f"Branch 1: IVR record already has vapi_webhook_event: {existing_vapi_webhook_event}")
+            
             logger.info(f"Updating existing twilio_call record {record_id} with data: {update_data}")
             
             # Update the existing record in Airtable
@@ -672,7 +713,7 @@ def status_callback():
                     
                     # Get the vapi_webhook_event from our IVR record (the one we just updated)
                     ivr_record_fields = record.get('fields', {})
-                    ivr_vapi_webhook_event = ivr_record_fields.get('vapi_webhook_event', [])
+                    ivr_vapi_webhook_event = existing_vapi_webhook_event  # Use the variable we set earlier
                     
                     logger.info(f"Branch 1: IVR record vapi_webhook_event: {ivr_vapi_webhook_event}")
                     
