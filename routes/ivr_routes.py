@@ -613,16 +613,143 @@ def status_callback():
                     logger.error(f"Branch 1: Failed to create child call record")
             else:
                 logger.info(f"Branch 1: No child calls found for ParentCallSid: {call_sid}")
+            
+            # Now look for a matching VAPI record to link vapi_webhook_event
+            logger.info(f"Branch 1: Looking for matching VAPI record with same From field and similar EndTime")
+            
+            # Get the From field and EndTime from our updated record
+            from_number = update_data.get('From')
+            end_time = update_data.get('EndTime')
+            
+            if from_number and end_time:
+                # Search for records with same From field and Type = "vapi"
+                matching_records = airtable_service.search_records_in_table(
+                    table_name=Config.TABLE_ID_TWILIO_CALL,
+                    field="From",
+                    value=from_number
+                )
+                
+                logger.info(f"Branch 1: Found {len(matching_records)} records with same From field: {from_number}")
+                
+                # Filter for records with Type = "vapi" and similar EndTime
+                from datetime import datetime
+                matching_vapi_records = []
+                
+                for record in matching_records:
+                    record_fields = record.get('fields', {})
+                    record_type = record_fields.get('Type')
+                    record_end_time = record_fields.get('EndTime')
+                    
+                    # Check if it's a VAPI record
+                    if record_type == 'vapi' and record_end_time:
+                        try:
+                            # Parse the end times for comparison
+                            new_end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                            record_end_dt = datetime.fromisoformat(record_end_time.replace('Z', '+00:00'))
+                            
+                            # Calculate time difference
+                            time_diff = abs((new_end_dt - record_end_dt).total_seconds())
+                            
+                            logger.info(f"Branch 1: Comparing with record {record['id']}: time_diff={time_diff}s")
+                            
+                            # Check if within 5 seconds
+                            if time_diff <= 5:
+                                matching_vapi_records.append(record)
+                                logger.info(f"Branch 1: Found matching VAPI record {record['id']} (time_diff={time_diff}s)")
+                            
+                        except Exception as e:
+                            logger.warning(f"Branch 1: Error parsing EndTime for record {record['id']}: {e}")
+                
+                # If we found a matching VAPI record, link the vapi_webhook_event
+                if matching_vapi_records:
+                    # Take the first matching record (closest in time)
+                    matching_vapi_record = matching_vapi_records[0]
+                    matching_vapi_fields = matching_vapi_record.get('fields', {})
+                    vapi_webhook_event = matching_vapi_fields.get('vapi_webhook_event', [])
+                    
+                    if vapi_webhook_event:
+                        logger.info(f"Branch 1: Linking vapi_webhook_event {vapi_webhook_event} from VAPI record {matching_vapi_record['id']}")
+                        
+                        # Update our record with the vapi_webhook_event link
+                        airtable_service.update_record_in_table(
+                            table_name=Config.TABLE_ID_TWILIO_CALL,
+                            record_id=record_id,
+                            data={'vapi_webhook_event': vapi_webhook_event}
+                        )
+                        
+                        logger.info(f"Branch 1: Successfully linked vapi_webhook_event to record {record_id}")
+                        
+                        # Now fetch VAPI details using the call_id from the linked vapi_webhook_event record
+                        logger.info(f"Branch 1: Fetching VAPI details for linked vapi_webhook_event")
+                        
+                        # Get the vapi_webhook_event record to extract call_id
+                        vapi_event_record = airtable_service.get_record_from_table(
+                            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                            record_id=vapi_webhook_event[0]  # Take the first linked record
+                        )
+                        
+                        if vapi_event_record:
+                            vapi_event_fields = vapi_event_record.get('fields', {})
+                            call_id = vapi_event_fields.get('call_id')
+                            
+                            if call_id:
+                                logger.info(f"Branch 1: Found call_id {call_id} in vapi_webhook_event record")
+                                
+                                # Fetch VAPI call data
+                                from routes.vapi_routes import VAPIWebhookService
+                                vapi_service = VAPIWebhookService()
+                                call_data = vapi_service.get_vapi_call_data(call_id)
+                                
+                                if call_data:
+                                    logger.info(f"Branch 1: Successfully fetched VAPI call data for call_id: {call_id}")
+                                    
+                                    # Prepare VAPI update data
+                                    vapi_update_data = {
+                                        'endedAt': call_data.get('endedAt'),
+                                        'transcript': call_data.get('transcript'),
+                                        'recordingUrl': call_data.get('recordingUrl'),
+                                        'summary': call_data.get('summary'),
+                                        'status': call_data.get('status'),
+                                        'cost': call_data.get('cost'),
+                                        'endedReason': call_data.get('endedReason'),
+                                    }
+                                    
+                                    # Handle nested analysis fields
+                                    analysis = call_data.get('analysis', {})
+                                    if analysis:
+                                        vapi_update_data['analysis_summary'] = analysis.get('summary')
+                                        vapi_update_data['analysis_succes_evaluation'] = analysis.get('successEvaluation')
+                                    
+                                    # Remove None values
+                                    vapi_update_data = {k: v for k, v in vapi_update_data.items() if v is not None}
+                                    
+                                    if vapi_update_data:
+                                        # Update the vapi_webhook_event record with VAPI data
+                                        airtable_service.update_record_in_table(
+                                            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
+                                            record_id=vapi_webhook_event[0],
+                                            data=vapi_update_data
+                                        )
+                                        
+                                        logger.info(f"Branch 1: Successfully updated vapi_webhook_event record with VAPI data")
+                                    else:
+                                        logger.warning(f"Branch 1: No VAPI data to update")
+                                else:
+                                    logger.warning(f"Branch 1: Failed to fetch VAPI call data for call_id: {call_id}")
+                            else:
+                                logger.warning(f"Branch 1: No call_id found in vapi_webhook_event record")
+                        else:
+                            logger.warning(f"Branch 1: Could not retrieve vapi_webhook_event record")
+                    else:
+                        logger.warning(f"Branch 1: No vapi_webhook_event found in matching VAPI record {matching_vapi_record['id']}")
+                else:
+                    logger.info(f"Branch 1: No matching VAPI record found within 5 seconds")
+            else:
+                logger.warning(f"Branch 1: Missing From field or EndTime for comparison")
         
         # Branch 2: No matching record found
         else:
             logger.info(f"Branch 2: No twilio_call record found for CallSid: {call_sid}, creating new record")
-            
-            # Add 8-second delay for Branch 2 processing
-            logger.info(f"Branch 2: Adding 15-second delay before processing...")
-            import time
-            time.sleep(15)
-            logger.info(f"Branch 2: Delay completed, proceeding with record creation")
             
             # Create new record with the same fields
             new_call_data = update_data.copy()
@@ -662,45 +789,29 @@ def status_callback():
                         matching_ivr_records = []
                         
                         for record in matching_records:
-                            # Skip the current record we just created
-                            if record['id'] == new_record['id']:
-                                logger.info(f"Branch 2: Skipping current record {record['id']} (just created)")
-                                continue
-                                
                             record_fields = record.get('fields', {})
                             record_type = record_fields.get('Type')
                             record_end_time = record_fields.get('EndTime')
                             
-                            logger.info(f"Branch 2: Checking record {record['id']}: Type='{record_type}', EndTime='{record_end_time}'")
-                            
                             # Check if it's an IVR record
-                            if record_type == 'ivr':
-                                logger.info(f"Branch 2: Record {record['id']} is IVR type")
-                                
-                                if record_end_time:
-                                    try:
-                                        # Parse the end times for comparison
-                                        new_end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-                                        record_end_dt = datetime.fromisoformat(record_end_time.replace('Z', '+00:00'))
-                                        
-                                        # Calculate time difference
-                                        time_diff = abs((new_end_dt - record_end_dt).total_seconds())
-                                        
-                                        logger.info(f"Branch 2: Comparing with record {record['id']}: new_end={new_end_dt}, record_end={record_end_dt}, time_diff={time_diff}s")
-                                        
-                                        # Check if within 5 seconds
-                                        if time_diff <= 5:
-                                            matching_ivr_records.append(record)
-                                            logger.info(f"Branch 2: Found matching IVR record {record['id']} (time_diff={time_diff}s)")
-                                        else:
-                                            logger.info(f"Branch 2: Record {record['id']} rejected - time_diff={time_diff}s > 5s")
+                            if record_type == 'ivr' and record_end_time:
+                                try:
+                                    # Parse the end times for comparison
+                                    new_end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                                    record_end_dt = datetime.fromisoformat(record_end_time.replace('Z', '+00:00'))
                                     
-                                    except Exception as e:
-                                        logger.warning(f"Branch 2: Error parsing EndTime for record {record['id']}: {e}")
-                                else:
-                                    logger.info(f"Branch 2: Record {record['id']} rejected - missing EndTime field")
-                            else:
-                                logger.info(f"Branch 2: Record {record['id']} rejected - Type='{record_type}' (not 'ivr')")
+                                    # Calculate time difference
+                                    time_diff = abs((new_end_dt - record_end_dt).total_seconds())
+                                    
+                                    logger.info(f"Branch 2: Comparing with record {record['id']}: time_diff={time_diff}s")
+                                    
+                                    # Check if within 5 seconds
+                                    if time_diff <= 5:
+                                        matching_ivr_records.append(record)
+                                        logger.info(f"Branch 2: Found matching IVR record {record['id']} (time_diff={time_diff}s)")
+                                    
+                                except Exception as e:
+                                    logger.warning(f"Branch 2: Error parsing EndTime for record {record['id']}: {e}")
                         
                         # If we found a matching IVR record, link the vapi_webhook_event
                         if matching_ivr_records:
@@ -720,68 +831,6 @@ def status_callback():
                                 )
                                 
                                 logger.info(f"Branch 2: Successfully linked vapi_webhook_event to new record {new_record['id']}")
-                                
-                                # Now fetch VAPI details using the call_id from the linked vapi_webhook_event record
-                                logger.info(f"Branch 2: Fetching VAPI details for linked vapi_webhook_event")
-                                
-                                # Get the vapi_webhook_event record to extract call_id
-                                vapi_event_record = airtable_service.get_record_from_table(
-                                    table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                                    record_id=vapi_webhook_event[0]  # Take the first linked record
-                                )
-                                
-                                if vapi_event_record:
-                                    vapi_event_fields = vapi_event_record.get('fields', {})
-                                    call_id = vapi_event_fields.get('call_id')
-                                    
-                                    if call_id:
-                                        logger.info(f"Branch 2: Found call_id {call_id} in vapi_webhook_event record")
-                                        
-                                        # Fetch VAPI call data
-                                        from routes.vapi_routes import VAPIWebhookService
-                                        vapi_service = VAPIWebhookService()
-                                        call_data = vapi_service.get_vapi_call_data(call_id)
-                                        
-                                        if call_data:
-                                            logger.info(f"Branch 2: Successfully fetched VAPI call data for call_id: {call_id}")
-                                            
-                                            # Prepare VAPI update data
-                                            vapi_update_data = {
-                                                'endedAt': call_data.get('endedAt'),
-                                                'transcript': call_data.get('transcript'),
-                                                'recordingUrl': call_data.get('recordingUrl'),
-                                                'summary': call_data.get('summary'),
-                                                'status': call_data.get('status'),
-                                                'cost': call_data.get('cost'),
-                                                'endedReason': call_data.get('endedReason'),
-                                            }
-                                            
-                                            # Handle nested analysis fields
-                                            analysis = call_data.get('analysis', {})
-                                            if analysis:
-                                                vapi_update_data['analysis_summary'] = analysis.get('summary')
-                                                vapi_update_data['analysis_succes_evaluation'] = analysis.get('successEvaluation')
-                                            
-                                            # Remove None values
-                                            vapi_update_data = {k: v for k, v in vapi_update_data.items() if v is not None}
-                                            
-                                            if vapi_update_data:
-                                                # Update the vapi_webhook_event record with VAPI data
-                                                airtable_service.update_record_in_table(
-                                                    table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                                                    record_id=vapi_webhook_event[0],
-                                                    data=vapi_update_data
-                                                )
-                                                
-                                                logger.info(f"Branch 2: Successfully updated vapi_webhook_event record with VAPI data")
-                                            else:
-                                                logger.warning(f"Branch 2: No VAPI data to update")
-                                        else:
-                                            logger.warning(f"Branch 2: Failed to fetch VAPI call data for call_id: {call_id}")
-                                    else:
-                                        logger.warning(f"Branch 2: No call_id found in vapi_webhook_event record")
-                                else:
-                                    logger.warning(f"Branch 2: Could not retrieve vapi_webhook_event record")
                             else:
                                 logger.warning(f"Branch 2: No vapi_webhook_event found in matching IVR record {matching_ivr_record['id']}")
                         else:
