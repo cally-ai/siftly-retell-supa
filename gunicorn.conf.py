@@ -25,8 +25,12 @@ else:
     cpu_count = multiprocessing.cpu_count()
     workers = min(cpu_count * 2 + 1, 8)
 
-# Worker class - use gevent for better async handling
-worker_class = 'gevent'
+# Worker class - try gevent first, fallback to sync
+try:
+    import gevent
+    worker_class = 'gevent'
+except ImportError:
+    worker_class = 'sync'
 
 # Maximum requests per worker before restart
 max_requests = 1000
