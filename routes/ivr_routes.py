@@ -78,7 +78,7 @@ class IVRService:
                 'client_id': fields.get('client', []),
                 'twilio_voice': fields.get('twilio_voice'),
                 'ivr_setup': fields.get('ivr_setup', True),  # Default to True for backward compatibility
-                'audio_file_ivr': fields.get('audio_file_ivr'),  # Main IVR audio file
+                'audio_url_ivr': fields.get('audio_url_ivr'),  # Main IVR audio URL
                 'options': []
             }
             
@@ -100,7 +100,7 @@ class IVRService:
                         # Get corresponding language code and reply
                         language_code_field = f"twilio_language_code_{option_num}"
                         reply_field = f"reply_{option_num}"
-                        audio_reply_field = f"audio_file_reply_{option_num}"  # New audio reply field
+                        audio_reply_field = f"audio_url_reply_{option_num}"  # Audio URL for reply
                         language_linked_field = f"language_{option_num}"
                         
                         option_config = {
@@ -108,7 +108,7 @@ class IVRService:
                             'text': field_value,
                             'language_code': fields.get(language_code_field),
                             'reply': fields.get(reply_field),
-                            'audio_reply': fields.get(audio_reply_field),  # Audio file for reply
+                            'audio_reply': fields.get(audio_reply_field),  # Audio URL for reply
                             'language_id': fields.get(language_linked_field, [])
                         }
                         
@@ -445,22 +445,16 @@ def ivr_handler():
             response = VoiceResponse()
             gather = Gather(num_digits=1, action='/ivr/handle-selection', method='POST', timeout=10)
             
-            # Check if we have an audio file for the IVR menu
-            if ivr_config.get('audio_file_ivr'):
-                logger.info(f"Using audio file for IVR menu: {ivr_config['audio_file_ivr']}")
-                # Extract URL from audio file data (could be list or dict)
-                audio_file_data = ivr_config['audio_file_ivr']
-                if isinstance(audio_file_data, list) and len(audio_file_data) > 0:
-                    audio_url = audio_file_data[0].get('url')
-                elif isinstance(audio_file_data, dict):
-                    audio_url = audio_file_data.get('url')
-                else:
-                    audio_url = str(audio_file_data)
+            # Check if we have an audio URL for the IVR menu
+            if ivr_config.get('audio_url_ivr'):
+                logger.info(f"Using audio URL for IVR menu: {ivr_config['audio_url_ivr']}")
+                # Use the audio URL directly (no need to extract from Airtable file structure)
+                audio_url = ivr_config['audio_url_ivr']
                 
                 if audio_url:
                     gather.play(audio_url)
                 else:
-                    logger.warning(f"Could not extract audio URL from: {audio_file_data}")
+                    logger.warning(f"Audio URL is empty for IVR menu")
                     # Fallback to text-to-speech
                     for option in ivr_config['options']:
                         if option['text'] and option['language_code'] and ivr_config['twilio_voice']:
@@ -471,8 +465,8 @@ def ivr_handler():
                                 language=option['language_code']
                             )
             else:
-                logger.info(f"No audio file found, using text-to-speech for IVR menu")
-                # Fallback to text-to-speech if no audio file
+                logger.info(f"No audio URL found, using text-to-speech for IVR menu")
+                # Fallback to text-to-speech if no audio URL
                 for option in ivr_config['options']:
                     if option['text'] and option['language_code'] and ivr_config['twilio_voice']:
                         logger.info(f"Adding IVR option {option['number']}: '{option['text']}' in {option['language_code']}")
@@ -652,20 +646,14 @@ def handle_selection():
         
         # Play the reply message if configured
         if selected_option.get('audio_reply'):
-            logger.info(f"Playing audio reply file: {selected_option['audio_reply']}")
-            # Extract URL from audio file data (could be list or dict)
-            audio_reply_data = selected_option['audio_reply']
-            if isinstance(audio_reply_data, list) and len(audio_reply_data) > 0:
-                audio_reply_url = audio_reply_data[0].get('url')
-            elif isinstance(audio_reply_data, dict):
-                audio_reply_url = audio_reply_data.get('url')
-            else:
-                audio_reply_url = str(audio_reply_data)
+            logger.info(f"Playing audio reply URL: {selected_option['audio_reply']}")
+            # Use the audio URL directly (no need to extract from Airtable file structure)
+            audio_reply_url = selected_option['audio_reply']
             
             if audio_reply_url:
                 response.play(audio_reply_url)
             else:
-                logger.warning(f"Could not extract audio reply URL from: {audio_reply_data}")
+                logger.warning(f"Audio reply URL is empty")
                 # Fallback to text-to-speech
                 if selected_option['reply'] and selected_option['language_code'] and ivr_config['twilio_voice']:
                     logger.info(f"Playing text reply message: '{selected_option['reply']}' in {selected_option['language_code']}")

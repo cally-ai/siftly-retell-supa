@@ -46,11 +46,39 @@ async def discover_phone_numbers():
         logger.info(f"Using fallback list: {fallback_numbers}")
         return fallback_numbers
 
+async def clear_ivr_cache():
+    """Clear existing IVR cache entries to force refresh with new field names"""
+    if not is_redis_configured():
+        logger.info("Redis not configured - skipping cache clear")
+        return
+    
+    try:
+        # Get all keys that match the IVR config pattern
+        pattern = "ivr_config_*"
+        keys = await redis_client.keys(pattern)
+        
+        if keys:
+            # Delete all IVR config cache entries
+            for key in keys:
+                await redis_client.delete(key)
+                logger.info(f"Cleared IVR cache entry: {key}")
+            
+            logger.info(f"Cleared {len(keys)} IVR cache entries")
+        else:
+            logger.info("No IVR cache entries found to clear")
+            
+    except Exception as e:
+        logger.error(f"Error clearing IVR cache: {e}")
+
 async def preload_cache():
     """Preload Airtable configurations into Redis cache"""
     if not is_redis_configured():
         logger.error("Redis not configured - cannot preload cache")
         return
+    
+    # Clear existing IVR cache to force refresh with new field names
+    logger.info("Clearing existing IVR cache to refresh with new audio URL fields")
+    await clear_ivr_cache()
     
     # Auto-discover phone numbers
     to_numbers = await discover_phone_numbers()
