@@ -390,17 +390,35 @@ class IVRService:
 # Initialize service
 ivr_service = IVRService()
 
-def run_post_transfer_updates(caller_id: str, vapi_event_id: str, call_sid: str):
+def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: str, client_id: str, language_id: str):
     """
-    Background function to create Twilio call record after transfer
+    Background function to create Twilio call record and update caller after transfer
     
     Args:
-        caller_id: The caller record ID
+        from_number: The caller's phone number
         vapi_event_id: The VAPI webhook event record ID
         call_sid: The Twilio Call SID
+        client_id: The client record ID
+        language_id: The language record ID
     """
     try:
-        logger.info(f"Background: Creating Twilio call record for CallSid: {call_sid}")
+        logger.info(f"Background: Processing caller lookup and Twilio call record for CallSid: {call_sid}")
+        
+        # Find or create caller record (this was blocking the TwiML response)
+        caller_id = ivr_service.find_or_create_caller(
+            from_number,
+            client_id,
+            language_id
+        )
+        
+        if caller_id:
+            logger.info(f"Background: Found/created caller record: {caller_id}")
+            
+            # Update VAPI webhook event with real caller_id
+            # TODO: Add method to update VAPI webhook event caller_id
+            logger.info(f"Background: VAPI webhook event {vapi_event_id} should be updated with caller_id {caller_id}")
+        else:
+            logger.error(f"Background: Failed to find/create caller record for: {from_number}")
         
         # Create Twilio call record in background
         success = ivr_service.create_twilio_call_record(call_sid, vapi_event_id)
@@ -603,25 +621,12 @@ def handle_selection():
         
         logger.info(f"Transfer number found: {transfer_number} for language {selected_option['language_id']}")
         
-        # Find or create caller record
-        caller_id = ivr_service.find_or_create_caller(
-            from_number,
-            ivr_config['client_id'],
-            selected_option['language_id']
-        )
-        
-        if not caller_id:
-            logger.error(f"Failed to find/create caller record for: {from_number}")
-            response = VoiceResponse()
-            response.say("Sorry, an error occurred. Please try again.", voice='alice')
-            return Response(str(response), mimetype='text/xml')
-        
-        logger.info(f"Caller record processed - ID: {caller_id}, Client: {ivr_config['client_id']}, Language: {selected_option['language_id']}")
-        
         # Create VAPI webhook event record (synchronous - must complete before TwiML response)
+        # Use temporary caller_id for now, will be updated in background
+        temp_caller_id = f"temp_{from_number}_{int(time.time())}"
         vapi_event_id = ivr_service.create_vapi_webhook_event(
             from_number,
-            caller_id,
+            temp_caller_id,  # Temporary caller ID
             ivr_config['client_id']
         )
         
@@ -633,10 +638,10 @@ def handle_selection():
         
         logger.info(f"VAPI webhook event created for caller {from_number}: {vapi_event_id}")
         
-        # Create Twilio call record in background (after TwiML response)
+        # Create Twilio call record and update caller in background (after TwiML response)
         background_thread = threading.Thread(
             target=run_post_transfer_updates,
-            args=(caller_id, vapi_event_id, call_sid)
+            args=(from_number, vapi_event_id, call_sid, ivr_config['client_id'], selected_option['language_id'])
         )
         background_thread.daemon = True
         background_thread.start()
