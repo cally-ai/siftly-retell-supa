@@ -679,6 +679,15 @@ def get_client_dynamic_variables():
             logger.error(f"No twilio_number found in client record: {client_record_id}")
             return jsonify({'error': 'No twilio_number in client record'}), 500
         
+        # Handle case where twilio_number is a list (linked record)
+        if isinstance(client_twilio_number, list):
+            if len(client_twilio_number) > 0:
+                client_twilio_number = client_twilio_number[0]  # Take first element
+                logger.info(f"Extracted twilio_number from list: {client_twilio_number}")
+            else:
+                logger.error(f"Empty twilio_number list in client record: {client_record_id}")
+                return jsonify({'error': 'Empty twilio_number list in client record'}), 500
+        
         logger.info(f"Found client twilio_number: {client_twilio_number}")
         
         # Step 6: Get dynamic variables from cache using client_twilio_number
