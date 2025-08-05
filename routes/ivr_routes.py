@@ -309,7 +309,7 @@ class IVRService:
         
         Args:
             from_number: The caller's phone number
-            caller_id: The caller record ID
+            caller_id: The caller record ID (can be None for initial creation)
             client_id: The client record ID
             
         Returns:
@@ -321,10 +321,13 @@ class IVRService:
             # Create VAPI webhook event record with only specified fields
             vapi_event_data = {
                 'from_number': from_number,
-                'caller': [caller_id],
                 'client': [client_id],
                 'transferred_time': datetime.utcnow().isoformat() + 'Z'
             }
+            
+            # Only add caller field if caller_id is provided
+            if caller_id:
+                vapi_event_data['caller'] = [caller_id]
             
             logger.info(f"Creating VAPI webhook event with data: {vapi_event_data}")
             
@@ -387,6 +390,42 @@ class IVRService:
             logger.error(f"Error creating Twilio call record: {e}")
             return False
 
+    def update_vapi_webhook_event_caller(self, vapi_event_id: str, caller_id: str) -> bool:
+        """
+        Update VAPI webhook event record with real caller_id
+        
+        Args:
+            vapi_event_id: The VAPI webhook event record ID
+            caller_id: The real caller record ID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Updating VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
+            
+            # Update the VAPI webhook event record
+            update_data = {
+                'caller': [caller_id]
+            }
+            
+            success = self.airtable_service.update_record_in_table(
+                table_name="vapi_webhook_event",
+                record_id=vapi_event_id,
+                data=update_data
+            )
+            
+            if success:
+                logger.info(f"Successfully updated VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
+                return True
+            else:
+                logger.error(f"Failed to update VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error updating VAPI webhook event caller: {e}")
+            return False
+
 # Initialize service
 ivr_service = IVRService()
 
@@ -415,8 +454,14 @@ def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: st
             logger.info(f"Background: Found/created caller record: {caller_id}")
             
             # Update VAPI webhook event with real caller_id
-            # TODO: Add method to update VAPI webhook event caller_id
-            logger.info(f"Background: VAPI webhook event {vapi_event_id} should be updated with caller_id {caller_id}")
+            try:
+                update_success = ivr_service.update_vapi_webhook_event_caller(vapi_event_id, caller_id)
+                if update_success:
+                    logger.info(f"Background: Successfully updated VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
+                else:
+                    logger.error(f"Background: Failed to update VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
+            except Exception as e:
+                logger.error(f"Background: Error updating VAPI webhook event caller: {e}")
         else:
             logger.error(f"Background: Failed to find/create caller record for: {from_number}")
         
@@ -622,11 +667,10 @@ def handle_selection():
         logger.info(f"Transfer number found: {transfer_number} for language {selected_option['language_id']}")
         
         # Create VAPI webhook event record (synchronous - must complete before TwiML response)
-        # Use temporary caller_id for now, will be updated in background
-        temp_caller_id = f"temp_{from_number}_{int(time.time())}"
+        # Create without caller field initially, will be updated in background
         vapi_event_id = ivr_service.create_vapi_webhook_event(
             from_number,
-            temp_caller_id,  # Temporary caller ID
+            None,  # No caller ID initially
             ivr_config['client_id']
         )
         
