@@ -575,80 +575,138 @@ def get_client_dynamic_variables():
                 logger.error("No JSON data or form data received")
                 return jsonify({'error': 'No data received'}), 400
         
-        # Extract toolCallId from the VAPI tool call format
-        tool_call_id = None
+        # Extract required fields from the new payload format
+        caller_number = data.get('caller_number')
+        time_api_request = data.get('time_api_request')
         
-        # Check for function tool format (has message.toolCallList)
-        if 'message' in data:
-            if 'toolCallList' in data['message']:
-                tool_call_list = data['message']['toolCallList']
-                if tool_call_list and len(tool_call_list) > 0:
-                    tool_call_id = tool_call_list[0].get('id')
+        if not caller_number:
+            logger.error("No caller_number found in request data")
+            return jsonify({'error': 'No caller_number provided'}), 400
         
-        # Check for API Request format (no toolCallId, just direct data)
-        if not tool_call_id:
-            tool_call_id = "api_request_tool_call_id"
+        if not time_api_request:
+            logger.error("No time_api_request found in request data")
+            return jsonify({'error': 'No time_api_request provided'}), 400
         
-        # Extract phone number from the request
-        # VAPI AI might send it in different formats, so we'll check multiple possible locations
-        from_number = None
+        logger.info(f"Processing request for caller: {caller_number}, time: {time_api_request}")
         
-        # Check if it's in the message data
-        if 'message' in data and 'call' in data['message']:
-            call_data = data['message']['call']
-            if 'customer' in call_data and 'number' in call_data['customer']:
-                from_number = call_data['customer']['number']
+        # Transform time format from "Aug 5, 2025, 8:12 AM UTC" to ISO format
+        try:
+            from datetime import datetime
+            import pytz
+            
+            # Parse the time string
+            parsed_time = datetime.strptime(time_api_request, "%b %d, %Y, %I:%M %p UTC")
+            # Convert to UTC timezone
+            utc_time = pytz.UTC.localize(parsed_time)
+            # Format as ISO string
+            iso_time = utc_time.isoformat()
+            
+            logger.info(f"Transformed time: {time_api_request} -> {iso_time}")
+            
+        except Exception as e:
+            logger.error(f"Error parsing time format: {e}")
+            return jsonify({'error': f'Invalid time format: {time_api_request}'}), 400
         
-        # Check if it's in the variables
-        if not from_number and 'message' in data and 'variables' in data['message']:
-            variables = data['message']['variables']
-            if 'customer' in variables and 'number' in variables['customer']:
-                from_number = variables['customer']['number']
+        # Step 1: Find matching vapi_webhook_event record
+        logger.info(f"Searching for vapi_webhook_event with from_number: {caller_number}")
         
-        # Check if it's directly in the payload
-        if not from_number and 'from_number' in data:
-            from_number = data['from_number']
-        
-        if not from_number:
-            logger.error("No from phone number found in request data")
-            return jsonify({
-                "results": [{
-                    "toolCallId": tool_call_id,
-                    "result": "Error: No from_number provided"
-                }]
-            }), 400
-        
-        logger.info(f"Looking up dynamic variables for: {from_number}")
-        
-        # Get dynamic variables using the same logic as the override endpoint
         vapi_service = VAPIWebhookService()
-        dynamic_variables = vapi_service._get_dynamic_variables_for_caller(from_number)
+        vapi_records = vapi_service.airtable_service.search_records_in_table(
+            table_name="vapi_webhook_event",
+            field="from_number",
+            value=caller_number
+        )
         
-        if dynamic_variables:
-            logger.info(f"Dynamic variables found for {from_number}")
-            return jsonify({
-                "results": [{
-                    "toolCallId": tool_call_id,
-                    "result": json.dumps(dynamic_variables)
-                }]
-            }), 200
-        else:
-            logger.warning(f"No dynamic variables found for {from_number}")
-            return jsonify({
-                "results": [{
-                    "toolCallId": tool_call_id,
-                    "result": "Error: No dynamic variables found"
-                }]
-            }), 404
+        if not vapi_records:
+            logger.warning(f"No vapi_webhook_event records found for caller: {caller_number}")
+            return jsonify({'error': 'No matching vapi_webhook_event found'}), 404
+        
+        # Step 2: Filter by transferred_time within 2 minutes of the API request time
+        matching_records = []
+        for record in vapi_records:
+            transferred_time = record.get('fields', {}).get('transferred_time')
+            if transferred_time:
+                try:
+                    # Parse the transferred_time (should be in ISO format)
+                    transferred_dt = datetime.fromisoformat(transferred_time.replace('Z', '+00:00'))
+                    # Calculate time difference
+                    time_diff = abs((utc_time - transferred_dt).total_seconds())
+                    
+                    # Check if within 2 minutes (120 seconds)
+                    if time_diff <= 120:
+                        matching_records.append({
+                            'record': record,
+                            'transferred_time': transferred_time,
+                            'time_diff': time_diff
+                        })
+                        logger.info(f"Found matching record with transferred_time: {transferred_time}, time_diff: {time_diff}s")
+                        
+                except Exception as e:
+                    logger.warning(f"Error parsing transferred_time {transferred_time}: {e}")
+                    continue
+        
+        if not matching_records:
+            logger.warning(f"No vapi_webhook_event records within 2 minutes for caller: {caller_number}")
+            return jsonify({'error': 'No matching vapi_webhook_event within time window'}), 404
+        
+        # Step 3: Get the record with newest transferred_time
+        matching_records.sort(key=lambda x: x['transferred_time'], reverse=True)
+        call_id_match = matching_records[0]['record']
+        
+        logger.info(f"Selected record with newest transferred_time: {matching_records[0]['transferred_time']}")
+        
+        # Step 4: Extract client from the matched record
+        client_linked_ids = call_id_match.get('fields', {}).get('client', [])
+        if not client_linked_ids:
+            logger.error(f"No client linked to vapi_webhook_event record")
+            return jsonify({'error': 'No client linked to matched record'}), 500
+        
+        client_record_id = client_linked_ids[0]
+        logger.info(f"Found client record ID: {client_record_id}")
+        
+        # Step 5: Get client's twilio_number
+        client_record = vapi_service.airtable_service.get_record_from_table(
+            table_name="client",
+            record_id=client_record_id
+        )
+        
+        if not client_record:
+            logger.error(f"Client record not found: {client_record_id}")
+            return jsonify({'error': 'Client record not found'}), 500
+        
+        client_twilio_number = client_record.get('fields', {}).get('twilio_number')
+        if not client_twilio_number:
+            logger.error(f"No twilio_number found in client record: {client_record_id}")
+            return jsonify({'error': 'No twilio_number in client record'}), 500
+        
+        logger.info(f"Found client twilio_number: {client_twilio_number}")
+        
+        # Step 6: Get dynamic variables from cache using client_twilio_number
+        from services.webhook_service import webhook_service
+        dynamic_variables = webhook_service._get_customer_data(client_twilio_number)
+        
+        if not dynamic_variables:
+            logger.warning(f"No dynamic variables found for twilio_number: {client_twilio_number}")
+            dynamic_variables = {
+                "customerName": "Unknown",
+                "accountType": "unknown"
+            }
+        
+        # Step 7: Return call_id and dynamic variables
+        call_id = call_id_match.get('fields', {}).get('call_id')
+        
+        response_data = {
+            "call_id": call_id,
+            "dynamic_variables": dynamic_variables
+        }
+        
+        logger.info(f"Returning call_id: {call_id} and {len(dynamic_variables)} dynamic variables")
+        
+        return jsonify(response_data), 200
             
     except Exception as e:
         logger.error(f"Error in get-client-dynamic-variables: {e}")
-        return jsonify({
-            "results": [{
-                "toolCallId": tool_call_id if 'tool_call_id' in locals() else "unknown",
-                "result": f"Error: {str(e)}"
-            }]
-        }), 500 
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500 
 
 @vapi_bp.route('/vapi-new-incoming-call-event', methods=['POST'])
 def vapi_new_incoming_call_event():
