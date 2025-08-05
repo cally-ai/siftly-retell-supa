@@ -711,6 +711,7 @@ def get_client_dynamic_variables():
         }
         
         logger.info(f"Returning call_id: {call_id} and {len(dynamic_variables)} dynamic variables")
+        logger.info(f"Response payload: {response_data}")
         
         return jsonify(response_data), 200
             
