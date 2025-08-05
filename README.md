@@ -88,7 +88,7 @@ The application will be available at `http://localhost:5000`
 3. Configure the service:
    - **Environment**: Python
    - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn app:app`
+   - **Start Command**: `gunicorn -c gunicorn.conf.py app:app`
 4. Add environment variables as listed above
 
 ## API Endpoints
