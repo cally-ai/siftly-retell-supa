@@ -692,12 +692,13 @@ def get_client_dynamic_variables():
                 "accountType": "unknown"
             }
         
-        # Step 7: Return call_id and dynamic variables
+        # Step 7: Return call_id and dynamic variables as flat structure
         call_id = call_id_match.get('fields', {}).get('call_id')
         
+        # Create flat response with call_id and all dynamic variables at root level
         response_data = {
             "call_id": call_id,
-            "dynamic_variables": dynamic_variables
+            **dynamic_variables  # Unpack all dynamic variables at root level
         }
         
         logger.info(f"Returning call_id: {call_id} and {len(dynamic_variables)} dynamic variables")
