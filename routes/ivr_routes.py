@@ -3,6 +3,7 @@ IVR Routes for handling Twilio IVR calls with dynamic language options
 """
 import logging
 import time
+import threading
 from flask import Blueprint, request, Response
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from services.airtable_service import AirtableService
@@ -302,21 +303,20 @@ class IVRService:
             logger.error(f"Error finding/creating caller for {phone_number}: {e}")
             return None
     
-    def create_vapi_webhook_event(self, from_number: str, caller_id: str, client_id: str, call_sid: str = None) -> bool:
+    def create_vapi_webhook_event(self, from_number: str, caller_id: str, client_id: str) -> str:
         """
-        Create records in both vapi_webhook_event and twilio_call tables
+        Create VAPI webhook event record (synchronous part)
         
         Args:
             from_number: The caller's phone number
             caller_id: The caller record ID
             client_id: The client record ID
-            call_sid: The Twilio Call SID
             
         Returns:
-            True if successful, False otherwise
+            VAPI webhook event record ID or None if failed
         """
         try:
-            logger.info(f"Creating VAPI webhook event and Twilio call records for caller: {from_number}")
+            logger.info(f"Creating VAPI webhook event record for caller: {from_number}")
             
             # Create VAPI webhook event record with only specified fields
             vapi_event_data = {
@@ -336,15 +336,34 @@ class IVRService:
             
             if not vapi_event_record:
                 logger.error(f"Failed to create VAPI webhook event record for {from_number}")
-                return False
+                return None
                 
             logger.info(f"Created VAPI webhook event record: {vapi_event_record['id']} for caller {from_number}")
+            return vapi_event_record['id']
+                
+        except Exception as e:
+            logger.error(f"Error creating VAPI webhook event record: {e}")
+            return None
+
+    def create_twilio_call_record(self, call_sid: str, vapi_event_id: str) -> bool:
+        """
+        Create Twilio call record (asynchronous part)
+        
+        Args:
+            call_sid: The Twilio Call SID
+            vapi_event_id: The VAPI webhook event record ID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Creating Twilio call record for CallSid: {call_sid}")
             
             # Create Twilio call record
             twilio_call_data = {
                 'CallSid': call_sid,  # Primary field
                 'Type': 'ivr',  # Select field
-                'vapi_webhook_event': [vapi_event_record['id']]  # Link to VAPI event record
+                'vapi_webhook_event': [vapi_event_id]  # Link to VAPI event record
             }
             
             logger.info(f"Creating Twilio call record with data: {twilio_call_data}")
@@ -356,20 +375,43 @@ class IVRService:
             )
             
             if not twilio_call_record:
-                logger.error(f"Failed to create Twilio call record for {from_number}")
+                logger.error(f"Failed to create Twilio call record for CallSid: {call_sid}")
                 return False
                 
-            logger.info(f"Created Twilio call record: {twilio_call_record['id']} for caller {from_number}")
-            logger.info(f"Successfully linked VAPI event {vapi_event_record['id']} to Twilio call {twilio_call_record['id']}")
+            logger.info(f"Created Twilio call record: {twilio_call_record['id']} for CallSid: {call_sid}")
+            logger.info(f"Successfully linked VAPI event {vapi_event_id} to Twilio call {twilio_call_record['id']}")
             
             return True
                 
         except Exception as e:
-            logger.error(f"Error creating VAPI webhook event and Twilio call records: {e}")
+            logger.error(f"Error creating Twilio call record: {e}")
             return False
 
 # Initialize service
 ivr_service = IVRService()
+
+def run_post_transfer_updates(caller_id: str, vapi_event_id: str, call_sid: str):
+    """
+    Background function to create Twilio call record after transfer
+    
+    Args:
+        caller_id: The caller record ID
+        vapi_event_id: The VAPI webhook event record ID
+        call_sid: The Twilio Call SID
+    """
+    try:
+        logger.info(f"Background: Creating Twilio call record for CallSid: {call_sid}")
+        
+        # Create Twilio call record in background
+        success = ivr_service.create_twilio_call_record(call_sid, vapi_event_id)
+        
+        if success:
+            logger.info(f"Background: Successfully created Twilio call record for CallSid: {call_sid}")
+        else:
+            logger.error(f"Background: Failed to create Twilio call record for CallSid: {call_sid}")
+            
+    except Exception as e:
+        logger.error(f"Background: Error in post-transfer updates for CallSid {call_sid}: {e}")
 
 @ivr_bp.route('', methods=['POST'], strict_slashes=False)
 @ivr_bp.route('/', methods=['POST'], strict_slashes=False)
@@ -478,19 +520,26 @@ def ivr_handler():
                 response.say("Sorry, caller record could not be created.", voice='alice')
                 return Response(str(response), mimetype='text/xml')
             
-            # Create VAPI webhook event and Twilio call records
-            event_created = ivr_service.create_vapi_webhook_event(
+            # Create VAPI webhook event record (synchronous)
+            vapi_event_id = ivr_service.create_vapi_webhook_event(
                 from_number,
                 caller_id,
-                ivr_config['client_id'],
-                call_sid
+                ivr_config['client_id']
             )
             
-            if not event_created:
+            if not vapi_event_id:
                 logger.error(f"Failed to create VAPI webhook event for {from_number}")
                 response = VoiceResponse()
                 response.say("Sorry, call setup failed.", voice='alice')
                 return Response(str(response), mimetype='text/xml')
+            
+            # Create Twilio call record in background
+            background_thread = threading.Thread(
+                target=run_post_transfer_updates,
+                args=(caller_id, vapi_event_id, call_sid)
+            )
+            background_thread.daemon = True
+            background_thread.start()
             
             # Transfer the call
             response = VoiceResponse()
@@ -575,18 +624,28 @@ def handle_selection():
         
         logger.info(f"Caller record processed - ID: {caller_id}, Client: {ivr_config['client_id']}, Language: {selected_option['language_id']}")
         
-        # Create VAPI webhook event record
-        event_created = ivr_service.create_vapi_webhook_event(
+        # Create VAPI webhook event record (synchronous - must complete before TwiML response)
+        vapi_event_id = ivr_service.create_vapi_webhook_event(
             from_number,
             caller_id,
-            ivr_config['client_id'],
-            call_sid  # Pass the Twilio Call SID
+            ivr_config['client_id']
         )
         
-        if not event_created:
-            logger.warning(f"Failed to create VAPI webhook event and Twilio call records for: {from_number}")
-        else:
-            logger.info(f"VAPI webhook event and Twilio call records created for caller {from_number}")
+        if not vapi_event_id:
+            logger.error(f"Failed to create VAPI webhook event for: {from_number}")
+            response = VoiceResponse()
+            response.say("Sorry, an error occurred. Please try again.", voice='alice')
+            return Response(str(response), mimetype='text/xml')
+        
+        logger.info(f"VAPI webhook event created for caller {from_number}: {vapi_event_id}")
+        
+        # Create Twilio call record in background (after TwiML response)
+        background_thread = threading.Thread(
+            target=run_post_transfer_updates,
+            args=(caller_id, vapi_event_id, call_sid)
+        )
+        background_thread.daemon = True
+        background_thread.start()
         
         # Build TwiML response
         response = VoiceResponse()
