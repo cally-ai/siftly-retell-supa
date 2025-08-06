@@ -772,6 +772,16 @@ def get_client_dynamic_variables():
                 "accountType": "unknown"
             }
         
+        # Step 6.5: Add caller_language dynamic variable if phone_number_id is provided
+        phone_number_id = data.get('phone_number_id')
+        if phone_number_id:
+            caller_language = vapi_service._get_caller_language_from_phone_id(phone_number_id)
+            if caller_language:
+                dynamic_variables["caller_language"] = caller_language
+                logger.info(f"Added caller_language dynamic variable: {caller_language}")
+            else:
+                logger.warning(f"Could not determine caller_language for phone_number_id: {phone_number_id}")
+        
         # Step 7: Return call_id and dynamic variables as flat structure
         call_id = call_id_match.get('fields', {}).get('call_id')
         
