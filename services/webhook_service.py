@@ -313,6 +313,7 @@ class WebhookService:
         from_number = inbound_data.get('from_number', '')
         to_number = inbound_data.get('to_number', '')
         agent_id = inbound_data.get('agent_id', '')
+        phone_number_id = inbound_data.get('phone_number_id', '')
         
         # Get client name for better logging
         customer_data = self._get_customer_data(to_number)
@@ -321,12 +322,12 @@ class WebhookService:
         
         # Get dynamic variables and configuration based on caller
         config_start = time.time()
-        response_data = self._get_inbound_configuration(from_number, to_number, agent_id)
+        response_data = self._get_inbound_configuration(from_number, to_number, agent_id, phone_number_id)
         # Removed verbose timing and response logging to reduce bloat
         
         return response_data
     
-    def _get_inbound_configuration(self, from_number: str, to_number: str, agent_id: str) -> Dict[str, Any]:
+    def _get_inbound_configuration(self, from_number: str, to_number: str, agent_id: str, phone_number_id: str = None) -> Dict[str, Any]:
         """
         Get dynamic variables and configuration for inbound call
         
@@ -334,6 +335,7 @@ class WebhookService:
             from_number: Caller's phone number
             to_number: Receiver's phone number
             agent_id: Default agent ID (if configured)
+            phone_number_id: The phone_number_id from the incoming payload (optional)
         
         Returns:
             Configuration response for Retell AI
@@ -381,6 +383,15 @@ class WebhookService:
             "original_agent_id": agent_id,
             "customer_known": customer_data is not None
         }
+        
+        # Add caller_language dynamic variable if phone_number_id is provided
+        if phone_number_id:
+            caller_language = self._get_caller_language_from_phone_id(phone_number_id)
+            if caller_language:
+                dynamic_vars["caller_language"] = caller_language
+                logger.info(f"Added caller_language dynamic variable: {caller_language}")
+            else:
+                logger.warning(f"Could not determine caller_language for phone_number_id: {phone_number_id}")
         
         # Build response
         response["call_inbound"]["dynamic_variables"] = dynamic_vars
@@ -1117,6 +1128,57 @@ class WebhookService:
         except Exception as e:
             logger.error(f"Error getting webhook statistics: {e}")
             return {}
+
+    def _get_caller_language_from_phone_id(self, phone_number_id: str) -> Optional[str]:
+        """
+        Get caller language based on phone_number_id from twilio_number table
+        
+        Args:
+            phone_number_id: The phone_number_id from the incoming payload
+            
+        Returns:
+            The vapi_language_code value or None if not found
+        """
+        try:
+            logger.info(f"Looking up caller language for phone_number_id: {phone_number_id}")
+            
+            # Search in twilio_number table for matching vapi_phone_number_id
+            twilio_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tbl0PeZoX2qgl74ZT')
+            
+            # Search for record with matching vapi_phone_number_id
+            twilio_records = twilio_table.all(formula=f"{{vapi_phone_number_id}} = '{phone_number_id}'")
+            
+            if not twilio_records:
+                logger.warning(f"No twilio_number record found for phone_number_id: {phone_number_id}")
+                return None
+            
+            twilio_record = twilio_records[0]
+            language_linked_ids = twilio_record['fields'].get('language', [])
+            
+            if not language_linked_ids:
+                logger.warning(f"No language linked to twilio_number record for phone_number_id: {phone_number_id}")
+                return None
+            
+            # Get the language record to extract vapi_language_code
+            language_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblT79Xju3vLxNipr')
+            language_record = language_table.get(language_linked_ids[0])
+            
+            if not language_record:
+                logger.warning(f"Language record not found for ID: {language_linked_ids[0]}")
+                return None
+            
+            vapi_language_code = language_record['fields'].get('vapi_language_code')
+            
+            if vapi_language_code:
+                logger.info(f"Found caller language: {vapi_language_code} for phone_number_id: {phone_number_id}")
+                return vapi_language_code
+            else:
+                logger.warning(f"No vapi_language_code found in language record for phone_number_id: {phone_number_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting caller language for phone_number_id {phone_number_id}: {e}")
+            return None
 
 # Global instance
 webhook_service = WebhookService() 

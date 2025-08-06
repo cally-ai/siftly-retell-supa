@@ -20,12 +20,13 @@ class VAPIWebhookService:
     def __init__(self):
         self.airtable_service = AirtableService()
     
-    def get_assistant_configuration(self, from_number: str) -> Optional[Dict[str, Any]]:
+    def get_assistant_configuration(self, from_number: str, phone_number_id: str = None) -> Optional[Dict[str, Any]]:
         """
         Get assistant configuration and dynamic variables for VAPI AI
         
         Args:
             from_number: The caller's phone number
+            phone_number_id: The phone_number_id from the incoming payload (optional)
             
         Returns:
             Assistant configuration with dynamic variables or None if not found
@@ -85,7 +86,7 @@ class VAPIWebhookService:
                 return None
             
             # Step 5: Get dynamic variables (similar to Retell inbound logic)
-            dynamic_variables = self._get_dynamic_variables_for_caller(from_number)
+            dynamic_variables = self._get_dynamic_variables_for_caller(from_number, phone_number_id)
             
             logger.info(f"Found assistant_id: {assistant_id} for from_number: {from_number}")
             
@@ -100,12 +101,13 @@ class VAPIWebhookService:
             logger.error(f"Error getting assistant configuration: {e}")
             return None
     
-    def _get_dynamic_variables_for_caller(self, from_number: str) -> Dict[str, Any]:
+    def _get_dynamic_variables_for_caller(self, from_number: str, phone_number_id: str = None) -> Dict[str, Any]:
         """
         Get dynamic variables for the caller (similar to Retell inbound logic)
         
         Args:
             from_number: The caller's phone number
+            phone_number_id: The phone_number_id from the incoming payload (optional)
             
         Returns:
             Dictionary of dynamic variables
@@ -210,11 +212,74 @@ class VAPIWebhookService:
             # Combine all dynamic variables
             all_dynamic_variables = {**client_dynamic_variables, **language_agent_names}
             
+            # Add caller_language dynamic variable if phone_number_id is provided
+            if phone_number_id:
+                caller_language = self._get_caller_language_from_phone_id(phone_number_id)
+                if caller_language:
+                    all_dynamic_variables["caller_language"] = caller_language
+                    logger.info(f"Added caller_language dynamic variable: {caller_language}")
+                else:
+                    logger.warning(f"Could not determine caller_language for phone_number_id: {phone_number_id}")
+            
             logger.info(f"Found {len(all_dynamic_variables)} dynamic variables for {phone_number}")
             return all_dynamic_variables
             
         except Exception as e:
             logger.error(f"Error getting customer data for {phone_number}: {e}")
+            return None
+            
+    def _get_caller_language_from_phone_id(self, phone_number_id: str) -> Optional[str]:
+        """
+        Get caller language based on phone_number_id from twilio_number table
+        
+        Args:
+            phone_number_id: The phone_number_id from the incoming payload
+            
+        Returns:
+            The vapi_language_code value or None if not found
+        """
+        try:
+            logger.info(f"Looking up caller language for phone_number_id: {phone_number_id}")
+            
+            # Search in twilio_number table for matching vapi_phone_number_id
+            twilio_records = self.airtable_service.search_records_in_table(
+                table_name="tbl0PeZoX2qgl74ZT",  # twilio_number table
+                field="vapi_phone_number_id",
+                value=phone_number_id
+            )
+            
+            if not twilio_records:
+                logger.warning(f"No twilio_number record found for phone_number_id: {phone_number_id}")
+                return None
+            
+            twilio_record = twilio_records[0]
+            language_linked_ids = twilio_record.get('fields', {}).get('language', [])
+            
+            if not language_linked_ids:
+                logger.warning(f"No language linked to twilio_number record for phone_number_id: {phone_number_id}")
+                return None
+            
+            # Get the language record to extract vapi_language_code
+            language_record = self.airtable_service.get_record_from_table(
+                table_name="tblT79Xju3vLxNipr",  # language table
+                record_id=language_linked_ids[0]
+            )
+            
+            if not language_record:
+                logger.warning(f"Language record not found for ID: {language_linked_ids[0]}")
+                return None
+            
+            vapi_language_code = language_record.get('fields', {}).get('vapi_language_code')
+            
+            if vapi_language_code:
+                logger.info(f"Found caller language: {vapi_language_code} for phone_number_id: {phone_number_id}")
+                return vapi_language_code
+            else:
+                logger.warning(f"No vapi_language_code found in language record for phone_number_id: {phone_number_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting caller language for phone_number_id {phone_number_id}: {e}")
             return None
 
     def get_vapi_call_data(self, call_id: str) -> Optional[Dict[str, Any]]:
@@ -436,10 +501,13 @@ def assistant_selector():
                 logger.error("No customer phone number in call data")
                 return jsonify({'error': 'No customer phone number provided'}), 400
             
-            logger.info(f"VAPI assistant request for: {from_number}")
+            # Extract phone_number_id if available in the call data
+            phone_number_id = call_data.get('phone_number_id')
+            
+            logger.info(f"VAPI assistant request for: {from_number} (phone_number_id: {phone_number_id})")
             
             # Get assistant configuration
-            assistant_config = vapi_service.get_assistant_configuration(from_number)
+            assistant_config = vapi_service.get_assistant_configuration(from_number, phone_number_id)
             
             if not assistant_config:
                 logger.warning(f"No assistant configuration found for: {from_number}")
@@ -505,10 +573,13 @@ def assistant_override_variable_values():
                 logger.error("No customer phone number in call data")
                 return jsonify({'error': 'No customer phone number provided'}), 400
             
-            logger.info(f"VAPI override request for: {from_number} (status: in-progress)")
+            # Extract phone_number_id if available in the call data
+            phone_number_id = call_data.get('phone_number_id')
+            
+            logger.info(f"VAPI override request for: {from_number} (status: in-progress, phone_number_id: {phone_number_id})")
             
             # Get dynamic variables only (no assistant lookup needed)
-            dynamic_variables = vapi_service._get_dynamic_variables_for_caller(from_number)
+            dynamic_variables = vapi_service._get_dynamic_variables_for_caller(from_number, phone_number_id)
             
             if not dynamic_variables:
                 logger.warning(f"No dynamic variables found for: {from_number}")
