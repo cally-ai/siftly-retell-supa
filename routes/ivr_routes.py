@@ -6,8 +6,9 @@ import time
 import threading
 from flask import Blueprint, request, Response
 from twilio.twiml.voice_response import VoiceResponse, Gather
-from services.airtable_service import AirtableService
+
 from config import Config
+from supabase import create_client
 import json
 import requests
 from datetime import datetime
@@ -22,7 +23,8 @@ class IVRService:
     """Service class for handling IVR functionality"""
     
     def __init__(self):
-        self.airtable_service = AirtableService()
+        # Initialize Supabase client
+        self.supabase = create_client(Config.SUPABASE_URL, Config.SUPABASE_SERVICE_ROLE_KEY)
     
     def get_ivr_configuration(self, twilio_number: str) -> dict:
         """
@@ -55,66 +57,61 @@ class IVRService:
                 except Exception as e:
                     logger.warning(f"Redis cache error for IVR config {twilio_number}: {e}")
             
-            # Fallback to Airtable lookup
-            logger.info(f"Performing Airtable lookup for IVR config: {twilio_number}")
+            # Fallback to Supabase lookup
+            logger.info(f"Performing Supabase lookup for IVR config: {twilio_number}")
             
-            # Search for IVR configuration record
-            ivr_records = self.airtable_service.search_records_in_table(
-                table_name="client_ivr_language_configuration",
-                field="client_ivr_twilio_number",
-                value=twilio_number
-            )
+            # Step 1: Query twilio_number table to get client_ivr_language_id
+            twilio_number_response = self.supabase.table('twilio_number').select('*').eq('twilio_number', twilio_number).execute()
             
-            if not ivr_records:
-                logger.warning(f"No IVR configuration found for Twilio number: {twilio_number}")
+            if not twilio_number_response.data:
+                logger.warning(f"No twilio_number record found for: {twilio_number}")
                 return None
             
-            ivr_record = ivr_records[0]
-            fields = ivr_record.get('fields', {})
+            twilio_number_record = twilio_number_response.data[0]
+            client_ivr_language_id = twilio_number_record.get('client_ivr_language_id')
+            
+            if not client_ivr_language_id:
+                logger.warning(f"No client_ivr_language_id found for twilio_number: {twilio_number}")
+                return None
+            
+            # Step 2: Query client_ivr_language_configuration table
+            ivr_config_response = self.supabase.table('client_ivr_language_configuration').select('*').eq('id', client_ivr_language_id).execute()
+            
+            if not ivr_config_response.data:
+                logger.warning(f"No IVR configuration found for client_ivr_language_id: {client_ivr_language_id}")
+                return None
+            
+            ivr_record = ivr_config_response.data[0]
             
             # Extract basic configuration
             config = {
-                'client_number': fields.get('client_ivr_twilio_number'),
-                'client_id': fields.get('client', []),
-                'twilio_voice': fields.get('twilio_voice'),
-                'ivr_setup': fields.get('ivr_setup', True),  # Default to True for backward compatibility
-                'audio_url_ivr': fields.get('audio_url_ivr'),  # Main IVR audio URL
+                'client_number': twilio_number,  # Use the input twilio_number
+                'client_id': ivr_record.get('client_id'),
+                'twilio_voice': ivr_record.get('twilio_voice'),
+                'ivr_setup': ivr_record.get('ivr_setup', True),  # Default to True for backward compatibility
+                'audio_url_ivr': ivr_record.get('audio_url_ivr'),  # Main IVR audio URL
                 'options': []
             }
-            
-            # Extract client_id (first linked record)
-            if config['client_id']:
-                config['client_id'] = config['client_id'][0]
             
             # Check if IVR setup is enabled
             if config['ivr_setup']:
                 logger.info(f"IVR setup enabled for number {twilio_number}, processing multiple language options")
                 
-                # Count and extract options
-                option_count = 0
-                for field_name, field_value in fields.items():
-                    if field_name.startswith('option_') and field_value:
-                        option_num = field_name.split('_')[1]
-                        option_count += 1
-                        
-                        # Get corresponding language code and reply
-                        language_code_field = f"twilio_language_code_{option_num}"
-                        reply_field = f"reply_{option_num}"
-                        audio_reply_field = f"audio_url_reply_{option_num}"  # Audio URL for reply
-                        language_linked_field = f"language_{option_num}"
+                # Step 3: Query client_ivr_language_configuration_language join table
+                language_options_response = self.supabase.table('client_ivr_language_configuration_language').select('*, language(*)').eq('client_ivr_language_configuration_id', client_ivr_language_id).execute()
+                
+                if language_options_response.data:
+                    for i, language_option in enumerate(language_options_response.data, 1):
+                        language_data = language_option.get('language', {})
                         
                         option_config = {
-                            'number': option_num,
-                            'text': field_value,
-                            'language_code': fields.get(language_code_field),
-                            'reply': fields.get(reply_field),
-                            'audio_reply': fields.get(audio_reply_field),  # Audio URL for reply
-                            'language_id': fields.get(language_linked_field, [])
+                            'number': str(i),
+                            'text': language_data.get('twilio_language_name', f"Option {i}"),
+                            'language_code': language_data.get('twilio_language_code'),
+                            'reply': language_data.get('reply'),
+                            'audio_reply': language_data.get('audio_url_reply'),
+                            'language_id': language_data.get('id')
                         }
-                        
-                        # Extract language_id (first linked record)
-                        if option_config['language_id']:
-                            option_config['language_id'] = option_config['language_id'][0]
                         
                         config['options'].append(option_config)
                 
@@ -122,13 +119,15 @@ class IVRService:
             else:
                 logger.info(f"IVR setup disabled for number {twilio_number}, using single language configuration")
                 
-                # For single language setup, get language_1
-                language_1_id = fields.get('language_1', [])
-                if language_1_id:
-                    config['language_1_id'] = language_1_id[0]  # Extract first linked record
+                # For single language setup, get the first language from the join table
+                language_options_response = self.supabase.table('client_ivr_language_configuration_language').select('*, language(*)').eq('client_ivr_language_configuration_id', client_ivr_language_id).limit(1).execute()
+                
+                if language_options_response.data:
+                    language_data = language_options_response.data[0].get('language', {})
+                    config['language_1_id'] = language_data.get('id')
                     logger.info(f"Single language configuration found with language_1_id: {config['language_1_id']}")
                 else:
-                    logger.error(f"No language_1 configured for single language setup: {twilio_number}")
+                    logger.error(f"No language configured for single language setup: {twilio_number}")
                     return None
             
             # Cache result in Redis if found and Redis is configured
@@ -177,52 +176,30 @@ class IVRService:
                 except Exception as e:
                     logger.warning(f"Redis cache error for transfer number {language_id}: {e}")
             
-            # Fallback to Airtable lookup
-            logger.info(f"Performing Airtable lookup for transfer number: {language_id}")
+            # Fallback to Supabase lookup
+            logger.info(f"Performing Supabase lookup for transfer number: {language_id}")
             
-            # Step 1: Get the language record from language table
-            language_record = self.airtable_service.get_record_from_table(
-                table_name="language",
-                record_id=language_id
-            )
+            # Step 1: Query vapi_workflow table to get the workflow for this language
+            vapi_workflow_response = self.supabase.table('vapi_workflow').select('*').eq('language_id', language_id).execute()
             
-            if not language_record:
-                logger.warning(f"Language record not found: {language_id}")
+            if not vapi_workflow_response.data:
+                logger.warning(f"No vapi_workflow found for language_id: {language_id}")
                 return None
             
-            # Step 2: Get linked vapi_workflow record
-            vapi_workflow_linked_ids = language_record.get('fields', {}).get('vapi_workflow', [])
-            if not vapi_workflow_linked_ids:
-                logger.warning(f"No vapi_workflow linked to language: {language_id}")
+            vapi_workflow_record = vapi_workflow_response.data[0]
+            vapi_workflow_id = vapi_workflow_record.get('id')
+            
+            # Step 2: Query twilio_number table to get the transfer number for this workflow
+            twilio_number_response = self.supabase.table('twilio_number').select('*').eq('vapi_workflow_id', vapi_workflow_id).execute()
+            
+            if not twilio_number_response.data:
+                logger.warning(f"No twilio_number found for vapi_workflow_id: {vapi_workflow_id}")
                 return None
             
-            vapi_workflow_id = vapi_workflow_linked_ids[0]
-            vapi_workflow_record = self.airtable_service.get_record_from_table(
-                table_name="vapi_workflow",
-                record_id=vapi_workflow_id
-            )
+            # Use the first twilio_number record (assuming one per workflow)
+            twilio_number_record = twilio_number_response.data[0]
+            transfer_number = twilio_number_record.get('twilio_number')
             
-            if not vapi_workflow_record:
-                logger.warning(f"VAPI workflow record not found: {vapi_workflow_id}")
-                return None
-            
-            # Step 3: Get linked twilio_number record
-            twilio_number_linked_ids = vapi_workflow_record.get('fields', {}).get('twilio_number', [])
-            if not twilio_number_linked_ids:
-                logger.warning(f"No twilio_number linked to vapi_workflow: {vapi_workflow_id}")
-                return None
-            
-            twilio_number_id = twilio_number_linked_ids[0]
-            twilio_number_record = self.airtable_service.get_record_from_table(
-                table_name="twilio_number",
-                record_id=twilio_number_id
-            )
-            
-            if not twilio_number_record:
-                logger.warning(f"Twilio number record not found: {twilio_number_id}")
-                return None
-            
-            transfer_number = twilio_number_record.get('fields', {}).get('twilio_number')
             logger.info(f"Found transfer number: {transfer_number} for language_id: {language_id} via vapi_workflow: {vapi_workflow_id}")
             
             # Cache result in Redis if found and Redis is configured
@@ -255,49 +232,57 @@ class IVRService:
         try:
             logger.info(f"Looking for caller: {phone_number}")
             
-            # Search for existing caller record
-            caller_records = self.airtable_service.search_records_in_table(
-                table_name="caller",
-                field="phone_number",
-                value=phone_number
-            )
+            # Step 1: Check if a caller exists with the same phone number
+            caller_response = self.supabase.table('caller').select('*').eq('phone_number', phone_number).limit(1).execute()
             
-            if caller_records:
-                # Update existing caller record with new language
-                caller_record = caller_records[0]
+            if caller_response.data:
+                # Step 2: Caller exists - update their language
+                caller_record = caller_response.data[0]
                 caller_id = caller_record['id']
                 
                 # Update the caller record with new language
-                self.airtable_service.update_record_in_table(
-                    table_name="caller",
-                    record_id=caller_id,
-                    data={
-                        'language': [language_id]
-                    }
-                )
+                update_response = self.supabase.table('caller').update({
+                    'caller_language_id': language_id
+                }).eq('id', caller_id).execute()
+                
+                if not update_response.data:
+                    logger.error(f"Failed to update caller record: {caller_id}")
+                    return None
+                
+                # Step 3: Check if client_caller relationship exists
+                client_caller_response = self.supabase.table('client_caller').select('*').eq('client_id', client_id).eq('caller_id', caller_id).execute()
+                
+                if not client_caller_response.data:
+                    # Create client_caller relationship
+                    self.supabase.table('client_caller').insert({
+                        'client_id': client_id,
+                        'caller_id': caller_id
+                    }).execute()
+                    logger.info(f"Created client_caller relationship for caller: {caller_id}, client: {client_id}")
                 
                 logger.info(f"Updated existing caller record: {caller_id} for {phone_number} with new language: {language_id}")
                 return caller_id
             else:
-                # Create new caller record
-                caller_data = {
+                # Step 4: Caller does not exist - create new caller
+                caller_insert_response = self.supabase.table('caller').insert({
                     'phone_number': phone_number,
-                    'client': [client_id],
-                    'language': [language_id]
-                }
+                    'caller_language_id': language_id
+                }).execute()
                 
-                caller_record = self.airtable_service.create_record_in_table(
-                    table_name="caller",
-                    data=caller_data
-                )
-                
-                if caller_record:
-                    caller_id = caller_record['id']
-                    logger.info(f"Created new caller record: {caller_id} for {phone_number} with client: {client_id}, language: {language_id}")
-                    return caller_id
-                else:
+                if not caller_insert_response.data:
                     logger.error(f"Failed to create caller record for {phone_number}")
                     return None
+                
+                new_caller_id = caller_insert_response.data[0]['id']
+                
+                # Step 5: Create client_caller relationship
+                self.supabase.table('client_caller').insert({
+                    'client_id': client_id,
+                    'caller_id': new_caller_id
+                }).execute()
+                
+                logger.info(f"Created new caller record: {new_caller_id} for {phone_number} with client: {client_id}, language: {language_id}")
+                return new_caller_id
                     
         except Exception as e:
             logger.error(f"Error finding/creating caller for {phone_number}: {e}")
@@ -321,28 +306,30 @@ class IVRService:
             # Create VAPI webhook event record with only specified fields
             vapi_event_data = {
                 'from_number': from_number,
-                'client': [client_id],
+                'client_id': client_id,
                 'transferred_time': datetime.utcnow().isoformat() + 'Z'
             }
             
             # Only add caller field if caller_id is provided
             if caller_id:
-                vapi_event_data['caller'] = [caller_id]
+                vapi_event_data['caller_id'] = caller_id
             
             logger.info(f"Creating VAPI webhook event with data: {vapi_event_data}")
             
             # Create the VAPI webhook event record
-            vapi_event_record = self.airtable_service.create_record_in_table(
-                table_name="vapi_webhook_event",
-                data=vapi_event_data
-            )
+            vapi_event_response = self.supabase.table('vapi_webhook_event').insert(vapi_event_data).execute()
             
-            if not vapi_event_record:
-                logger.error(f"Failed to create VAPI webhook event record for {from_number}")
+            if vapi_event_response.error:
+                logger.error(f"Failed to create VAPI webhook event record for {from_number}: {vapi_event_response.error}")
+                return None
+            
+            if not vapi_event_response.data:
+                logger.error(f"Failed to create VAPI webhook event record for {from_number}: No data returned")
                 return None
                 
-            logger.info(f"Created VAPI webhook event record: {vapi_event_record['id']} for caller {from_number}")
-            return vapi_event_record['id']
+            vapi_event_id = vapi_event_response.data[0]['id']
+            logger.info(f"Created VAPI webhook event record: {vapi_event_id} for caller {from_number}")
+            return vapi_event_id
                 
         except Exception as e:
             logger.error(f"Error creating VAPI webhook event record: {e}")
@@ -364,25 +351,27 @@ class IVRService:
             
             # Create Twilio call record
             twilio_call_data = {
-                'CallSid': call_sid,  # Primary field
-                'Type': 'ivr',  # Select field
-                'vapi_webhook_event': [vapi_event_id]  # Link to VAPI event record
+                'call_sid': call_sid,  # Primary field
+                'call_type': 'ivr',  # Enum field
+                'vapi_webhook_event_id': vapi_event_id  # Foreign key to VAPI event record
             }
             
             logger.info(f"Creating Twilio call record with data: {twilio_call_data}")
             
             # Create the Twilio call record
-            twilio_call_record = self.airtable_service.create_record_in_table(
-                table_name="twilio_call",
-                data=twilio_call_data
-            )
+            twilio_call_response = self.supabase.table('twilio_call').insert(twilio_call_data).execute()
             
-            if not twilio_call_record:
-                logger.error(f"Failed to create Twilio call record for CallSid: {call_sid}")
+            if twilio_call_response.error:
+                logger.error(f"Failed to create Twilio call record for CallSid: {call_sid}: {twilio_call_response.error}")
                 return False
                 
-            logger.info(f"Created Twilio call record: {twilio_call_record['id']} for CallSid: {call_sid}")
-            logger.info(f"Successfully linked VAPI event {vapi_event_id} to Twilio call {twilio_call_record['id']}")
+            if not twilio_call_response.data:
+                logger.error(f"Failed to create Twilio call record for CallSid: {call_sid}: No data returned")
+                return False
+                
+            twilio_call_id = twilio_call_response.data[0]['id']
+            logger.info(f"Created Twilio call record: {twilio_call_id} for CallSid: {call_sid}")
+            logger.info(f"Successfully linked VAPI event {vapi_event_id} to Twilio call {twilio_call_id}")
             
             return True
                 
@@ -406,21 +395,21 @@ class IVRService:
             
             # Update the VAPI webhook event record
             update_data = {
-                'caller': [caller_id]
+                'caller_id': caller_id
             }
             
-            success = self.airtable_service.update_record_in_table(
-                table_name="vapi_webhook_event",
-                record_id=vapi_event_id,
-                data=update_data
-            )
+            update_response = self.supabase.table('vapi_webhook_event').update(update_data).eq('id', vapi_event_id).execute()
             
-            if success:
-                logger.info(f"Successfully updated VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
-                return True
-            else:
-                logger.error(f"Failed to update VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
+            if update_response.error:
+                logger.error(f"Failed to update VAPI webhook event {vapi_event_id} with caller_id {caller_id}: {update_response.error}")
                 return False
+                
+            if not update_response.data:
+                logger.error(f"Failed to update VAPI webhook event {vapi_event_id} with caller_id {caller_id}: No data returned")
+                return False
+                
+            logger.info(f"Successfully updated VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
+            return True
                 
         except Exception as e:
             logger.error(f"Error updating VAPI webhook event caller: {e}")
@@ -767,16 +756,15 @@ def status_callback():
         logger.info(f"Fetching call details from Twilio for CallSid: {call_sid}")
         call_details = client.calls(call_sid).fetch()
         
-        # Initialize Airtable service
-        airtable_service = AirtableService()
-        
         # Look up the CallSid in our twilio_call table
         logger.info(f"Searching for CallSid {call_sid} in twilio_call table")
-        twilio_call_match = airtable_service.search_records_in_table(
-            table_name=Config.TABLE_ID_TWILIO_CALL,
-            field="CallSid",
-            value=call_sid
-        )
+        twilio_call_response = self.supabase.table("twilio_call").select("*").eq("call_sid", call_sid).execute()
+        
+        if twilio_call_response.error:
+            logger.error(f"Error searching for call_sid '{call_sid}': {twilio_call_response.error}")
+            twilio_call_match = []
+        else:
+            twilio_call_match = twilio_call_response.data or []
         
         # Prepare update data with the specified fields
         update_data = {}
@@ -840,24 +828,30 @@ def status_callback():
                 
                 # Try to get caller and client from the record if available
                 if hasattr(record, 'caller') and record.caller:
-                    vapi_event_data['caller'] = [record.caller]
+                    vapi_event_data['caller_id'] = record.caller
                 if hasattr(record, 'client') and record.client:
-                    vapi_event_data['client'] = [record.client]
+                    vapi_event_data['client_id'] = record.client
                 
-                vapi_event_record = airtable_service.create_record_in_table(
-                    table_name="vapi_webhook_event",
-                    data=vapi_event_data
-                )
+                vapi_event_response = self.supabase.table("vapi_webhook_event").insert(vapi_event_data).execute()
+                
+                if vapi_event_response.error:
+                    logger.error(f"Error creating vapi_webhook_event: {vapi_event_response.error}")
+                    vapi_event_record = None
+                else:
+                    vapi_event_record = vapi_event_response.data[0] if vapi_event_response.data else None
                 
                 if vapi_event_record:
                     logger.info(f"Branch 1: Created vapi_webhook_event record: {vapi_event_record['id']}")
                     
                     # Update the IVR record with the vapi_webhook_event link
-                    airtable_service.update_record_in_table(
-                        table_name=Config.TABLE_ID_TWILIO_CALL,
-                        record_id=record_id,
-                        data={'vapi_webhook_event': [vapi_event_record['id']]}
-                    )
+                    update_data = {
+                        'vapi_webhook_event_id': vapi_event_record['id']
+                    }
+                    
+                    response = self.supabase.table("twilio_call").update(update_data).eq("id", record_id).execute()
+                    
+                    if response.error:
+                        logger.error(f"Error updating Twilio call with VAPI event: {response.error}")
                     
                     logger.info(f"Branch 1: Updated IVR record with vapi_webhook_event link")
                     existing_vapi_webhook_event = [vapi_event_record['id']]
@@ -868,14 +862,37 @@ def status_callback():
             
             logger.info(f"Updating existing twilio_call record {record_id} with data: {update_data}")
             
-            # Update the existing record in Airtable
+            # Update the existing record in Supabase
             if update_data:
-                airtable_service.update_record_in_table(
-                    table_name=Config.TABLE_ID_TWILIO_CALL,
-                    record_id=record_id,
-                    data=update_data
-                )
-                logger.info(f"Successfully updated twilio_call record {record_id} with Twilio call completion data")
+                # Map fields to Supabase-compatible names
+                mapped_data = {}
+                if 'CallSid' in update_data:
+                    mapped_data['call_sid'] = update_data['CallSid']
+                if 'AccountSid' in update_data:
+                    mapped_data['account_sid'] = update_data['AccountSid']
+                if 'From' in update_data:
+                    mapped_data['from_number'] = update_data['From']
+                if 'To' in update_data:
+                    mapped_data['to_number'] = update_data['To']
+                if 'Direction' in update_data:
+                    mapped_data['direction'] = update_data['Direction']
+                if 'StartTime' in update_data:
+                    mapped_data['start_time'] = update_data['StartTime']
+                if 'EndTime' in update_data:
+                    mapped_data['end_time'] = update_data['EndTime']
+                if 'Duration' in update_data:
+                    mapped_data['duration'] = int(update_data['Duration'])
+                if 'AnsweredBy' in update_data:
+                    mapped_data['answered_by'] = update_data['AnsweredBy']
+                if 'ForwardedFrom' in update_data:
+                    mapped_data['forwarded_from'] = update_data['ForwardedFrom']
+                
+                response = self.supabase.table("twilio_call").update(mapped_data).eq("id", record_id).execute()
+                
+                if response.error:
+                    logger.error(f"Error updating twilio_call record {record_id}: {response.error}")
+                else:
+                    logger.info(f"Successfully updated twilio_call record {record_id} with Twilio call completion data")
             else:
                 logger.warning(f"No update data prepared for twilio_call record {record_id}")
             
@@ -935,11 +952,43 @@ def status_callback():
                 
                 logger.info(f"Branch 1: Creating child call record with data: {child_call_data}")
                 
+                # Map child call data to Supabase-compatible names
+                mapped_child_data = {}
+                if 'CallSid' in child_call_data:
+                    mapped_child_data['call_sid'] = child_call_data['CallSid']
+                if 'Type' in child_call_data:
+                    mapped_child_data['call_type'] = child_call_data['Type']
+                if 'Parent' in child_call_data:
+                    mapped_child_data['parent_id'] = child_call_data['Parent'][0] if child_call_data['Parent'] else None
+                if 'AccountSid' in child_call_data:
+                    mapped_child_data['account_sid'] = child_call_data['AccountSid']
+                if 'From' in child_call_data:
+                    mapped_child_data['from_number'] = child_call_data['From']
+                if 'To' in child_call_data:
+                    mapped_child_data['to_number'] = child_call_data['To']
+                if 'Direction' in child_call_data:
+                    mapped_child_data['direction'] = child_call_data['Direction']
+                if 'StartTime' in child_call_data:
+                    mapped_child_data['start_time'] = child_call_data['StartTime']
+                if 'EndTime' in child_call_data:
+                    mapped_child_data['end_time'] = child_call_data['EndTime']
+                if 'Duration' in child_call_data:
+                    mapped_child_data['duration'] = int(child_call_data['Duration'])
+                if 'AnsweredBy' in child_call_data:
+                    mapped_child_data['answered_by'] = child_call_data['AnsweredBy']
+                if 'ForwardedFrom' in child_call_data:
+                    mapped_child_data['forwarded_from'] = child_call_data['ForwardedFrom']
+                if 'vapi_webhook_event' in child_call_data:
+                    mapped_child_data['vapi_webhook_event_id'] = child_call_data['vapi_webhook_event'][0] if child_call_data['vapi_webhook_event'] else None
+                
                 # Create child call record
-                child_record = airtable_service.create_record_in_table(
-                    table_name=Config.TABLE_ID_TWILIO_CALL,
-                    data=child_call_data
-                )
+                child_response = self.supabase.table("twilio_call").insert(mapped_child_data).execute()
+                
+                if child_response.error:
+                    logger.error(f"Failed to create child twilio_call record: {child_response.error}")
+                    child_record = None
+                else:
+                    child_record = child_response.data[0] if child_response.data else None
                 
                 if child_record:
                     logger.info(f"Branch 1: Successfully created child call record: {child_record['id']}")
@@ -957,11 +1006,13 @@ def status_callback():
             
             if from_number and end_time:
                 # Search for records with same From field and Type = "vapi"
-                matching_records = airtable_service.search_records_in_table(
-                    table_name=Config.TABLE_ID_TWILIO_CALL,
-                    field="From",
-                    value=from_number
-                )
+                response = self.supabase.table("twilio_call").select("*").eq("from_number", from_number).execute()
+                
+                if response.error:
+                    logger.error(f"Error searching twilio_call records with from_number {from_number}: {response.error.message}")
+                    matching_records = []
+                else:
+                    matching_records = response.data or []
                 
                 logger.info(f"Branch 1: Found {len(matching_records)} records with same From field: {from_number}")
                 
@@ -1013,23 +1064,38 @@ def status_callback():
                     if ivr_vapi_webhook_event:
                         logger.info(f"Branch 1: Updating VAPI record {matching_vapi_record['id']} with vapi_webhook_event from IVR record")
                         
-                        # Update the VAPI record with the vapi_webhook_event from the IVR record
-                        airtable_service.update_record_in_table(
-                            table_name=Config.TABLE_ID_TWILIO_CALL,
-                            record_id=matching_vapi_record['id'],
-                            data={'vapi_webhook_event': ivr_vapi_webhook_event}
-                        )
-                        
-                        logger.info(f"Branch 1: Successfully updated VAPI record {matching_vapi_record['id']} with vapi_webhook_event")
+                        # Validate ivr_vapi_webhook_event is a non-empty list
+                        if isinstance(ivr_vapi_webhook_event, list) and ivr_vapi_webhook_event:
+                            vapi_webhook_event_id = ivr_vapi_webhook_event[0]
+                            
+                            # Update the VAPI record with the vapi_webhook_event_id from the IVR record
+                            update_data = {
+                                'vapi_webhook_event_id': vapi_webhook_event_id
+                            }
+                            
+                            response = self.supabase.table("twilio_call").update(update_data).eq("id", matching_vapi_record['id']).execute()
+                            
+                            if response.error:
+                                logger.error(f"Failed to update vapi_webhook_event_id in twilio_call: {response.error}")
+                            else:
+                                logger.info(f"Branch 1: Successfully updated VAPI record {matching_vapi_record['id']} with vapi_webhook_event_id")
+                        else:
+                            logger.warning("ivr_vapi_webhook_event is empty or invalid; skipping Supabase update")
                         
                         # Now fetch VAPI details using the call_id from the linked vapi_webhook_event record
                         logger.info(f"Branch 1: Fetching VAPI details for linked vapi_webhook_event")
                         
                         # Get the vapi_webhook_event record to extract call_id
-                        vapi_event_record = airtable_service.get_record_from_table(
-                            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                            record_id=ivr_vapi_webhook_event[0]  # Take the first linked record
-                        )
+                        record_id = ivr_vapi_webhook_event[0]  # Take the first linked record
+                        response = self.supabase.table("vapi_webhook_event").select("*").eq("id", record_id).limit(1).execute()
+                        
+                        if response.error:
+                            logger.error(f"Supabase error while retrieving vapi_webhook_event {record_id}: {response.error.message}")
+                            vapi_event_record = None
+                        elif response.data:
+                            vapi_event_record = response.data[0]
+                        else:
+                            vapi_event_record = None
                         
                         if vapi_event_record:
                             vapi_event_fields = vapi_event_record.get('fields', {})
@@ -1067,14 +1133,35 @@ def status_callback():
                                     vapi_update_data = {k: v for k, v in vapi_update_data.items() if v is not None}
                                     
                                     if vapi_update_data:
-                                        # Update the vapi_webhook_event record with VAPI data
-                                        airtable_service.update_record_in_table(
-                                            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                                            record_id=ivr_vapi_webhook_event[0],
-                                            data=vapi_update_data
-                                        )
+                                        # Map fields to Supabase-compatible names
+                                        mapped_vapi_data = {}
+                                        if 'endedAt' in vapi_update_data:
+                                            mapped_vapi_data['ended_at'] = vapi_update_data['endedAt']
+                                        if 'transcript' in vapi_update_data:
+                                            mapped_vapi_data['transcript'] = vapi_update_data['transcript']
+                                        if 'recordingUrl' in vapi_update_data:
+                                            mapped_vapi_data['recording_url'] = vapi_update_data['recordingUrl']
+                                        if 'summary' in vapi_update_data:
+                                            mapped_vapi_data['summary'] = vapi_update_data['summary']
+                                        if 'status' in vapi_update_data:
+                                            mapped_vapi_data['status'] = vapi_update_data['status']
+                                        if 'cost' in vapi_update_data:
+                                            mapped_vapi_data['cost'] = vapi_update_data['cost']
+                                        if 'endedReason' in vapi_update_data:
+                                            mapped_vapi_data['ended_reason'] = vapi_update_data['endedReason']
+                                        if 'analysis_summary' in vapi_update_data:
+                                            mapped_vapi_data['analysis_summary'] = vapi_update_data['analysis_summary']
+                                        if 'analysis_succes_evaluation' in vapi_update_data:
+                                            mapped_vapi_data['analysis_success_evaluation'] = vapi_update_data['analysis_succes_evaluation']
                                         
-                                        logger.info(f"Branch 1: Successfully updated vapi_webhook_event record with VAPI data")
+                                        # Update the vapi_webhook_event record with VAPI data
+                                        record_id = ivr_vapi_webhook_event[0]
+                                        response = self.supabase.table("vapi_webhook_event").update(mapped_vapi_data).eq("id", record_id).execute()
+                                        
+                                        if response.error:
+                                            logger.error(f"Error updating vapi_webhook_event record {record_id}: {response.error.message}")
+                                        else:
+                                            logger.info(f"Branch 1: Successfully updated vapi_webhook_event record with VAPI data")
                                     else:
                                         logger.warning(f"Branch 1: No VAPI data to update")
                                 else:
@@ -1100,12 +1187,40 @@ def status_callback():
             
             logger.info(f"Branch 2: Creating new twilio_call record with data: {new_call_data}")
             
-            # Create the new record in Airtable
+            # Create the new record in Supabase
             if new_call_data:
-                new_record = airtable_service.create_record_in_table(
-                    table_name=Config.TABLE_ID_TWILIO_CALL,
-                    data=new_call_data
-                )
+                # Map fields to Supabase-compatible names
+                mapped_new_data = {}
+                if 'CallSid' in new_call_data:
+                    mapped_new_data['call_sid'] = new_call_data['CallSid']
+                if 'AccountSid' in new_call_data:
+                    mapped_new_data['account_sid'] = new_call_data['AccountSid']
+                if 'From' in new_call_data:
+                    mapped_new_data['from_number'] = new_call_data['From']
+                if 'To' in new_call_data:
+                    mapped_new_data['to_number'] = new_call_data['To']
+                if 'Direction' in new_call_data:
+                    mapped_new_data['direction'] = new_call_data['Direction']
+                if 'StartTime' in new_call_data:
+                    mapped_new_data['start_time'] = new_call_data['StartTime']
+                if 'EndTime' in new_call_data:
+                    mapped_new_data['end_time'] = new_call_data['EndTime']
+                if 'Duration' in new_call_data:
+                    mapped_new_data['duration'] = int(new_call_data['Duration'])
+                if 'AnsweredBy' in new_call_data:
+                    mapped_new_data['answered_by'] = new_call_data['AnsweredBy']
+                if 'ForwardedFrom' in new_call_data:
+                    mapped_new_data['forwarded_from'] = new_call_data['ForwardedFrom']
+                if 'Type' in new_call_data:
+                    mapped_new_data['call_type'] = new_call_data['Type']
+                
+                response = self.supabase.table("twilio_call").insert(mapped_new_data).execute()
+                
+                if response.error:
+                    logger.error(f"Failed to create new twilio_call record: {response.error}")
+                    new_record = None
+                else:
+                    new_record = response.data[0] if response.data else None
                 
                 if new_record:
                     logger.info(f"Branch 2: Successfully created new twilio_call record: {new_record['id']}")
@@ -1118,12 +1233,14 @@ def status_callback():
                     end_time = new_call_data.get('EndTime')
                     
                     if from_number and end_time:
-                        # Search for records with same From field and Type = "ivr"
-                        matching_records = airtable_service.search_records_in_table(
-                            table_name=Config.TABLE_ID_TWILIO_CALL,
-                            field="From",
-                            value=from_number
-                        )
+                        # Search for records with same from_number field
+                        response = self.supabase.table("twilio_call").select("*").eq("from_number", from_number).execute()
+                        
+                        if response.error:
+                            logger.error(f"Error searching twilio_call records with from_number {from_number}: {response.error}")
+                            matching_records = []
+                        else:
+                            matching_records = response.data or []
                         
                         logger.info(f"Branch 2: Found {len(matching_records)} records with same From field: {from_number}")
                         
@@ -1132,9 +1249,8 @@ def status_callback():
                         matching_ivr_records = []
                         
                         for record in matching_records:
-                            record_fields = record.get('fields', {})
-                            record_type = record_fields.get('Type')
-                            record_end_time = record_fields.get('EndTime')
+                            record_type = record.get('call_type')
+                            record_end_time = record.get('end_time')
                             
                             # Check if it's an IVR record
                             if record_type == 'ivr' and record_end_time:
@@ -1160,22 +1276,24 @@ def status_callback():
                         if matching_ivr_records:
                             # Take the first matching record (closest in time)
                             matching_ivr_record = matching_ivr_records[0]
-                            matching_ivr_fields = matching_ivr_record.get('fields', {})
-                            vapi_webhook_event = matching_ivr_fields.get('vapi_webhook_event', [])
+                            vapi_webhook_event_id = matching_ivr_record.get('vapi_webhook_event_id')
                             
-                            if vapi_webhook_event:
-                                logger.info(f"Branch 2: Linking vapi_webhook_event {vapi_webhook_event} from IVR record {matching_ivr_record['id']}")
+                            if vapi_webhook_event_id:
+                                logger.info(f"Branch 2: Linking vapi_webhook_event_id {vapi_webhook_event_id} from IVR record {matching_ivr_record['id']}")
                                 
-                                # Update our new record with the vapi_webhook_event link
-                                airtable_service.update_record_in_table(
-                                    table_name=Config.TABLE_ID_TWILIO_CALL,
-                                    record_id=new_record['id'],
-                                    data={'vapi_webhook_event': vapi_webhook_event}
-                                )
+                                # Update our new record with the vapi_webhook_event_id link
+                                update_data = {
+                                    'vapi_webhook_event_id': vapi_webhook_event_id
+                                }
                                 
-                                logger.info(f"Branch 2: Successfully linked vapi_webhook_event to new record {new_record['id']}")
+                                response = self.supabase.table("twilio_call").update(update_data).eq("id", new_record['id']).execute()
+                                
+                                if response.error:
+                                    logger.error(f"Error updating twilio_call with VAPI event: {response.error}")
+                                else:
+                                    logger.info(f"Branch 2: Successfully linked vapi_webhook_event_id to new record {new_record['id']}")
                             else:
-                                logger.warning(f"Branch 2: No vapi_webhook_event found in matching IVR record {matching_ivr_record['id']}")
+                                logger.warning(f"Branch 2: No vapi_webhook_event_id found in matching IVR record {matching_ivr_record['id']}")
                         else:
                             logger.info(f"Branch 2: No matching IVR record found within 5 seconds")
                     else:
@@ -1199,7 +1317,7 @@ def ivr_debug():
             'status': 'success',
             'message': 'IVR service is running',
             'service': 'IVRService',
-            'airtable_service': 'AirtableService'
+            'database': 'Supabase'
         }
     except Exception as e:
         return {
