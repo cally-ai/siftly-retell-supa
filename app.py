@@ -7,7 +7,7 @@ from flask import Flask
 from utils.logger import setup_logger
 from config import Config, config
 from routes.health_routes import health_bp
-from routes.webhook_routes import webhook_bp
+
 from routes.airtable_routes import airtable_bp
 
 from routes.vapi_routes import vapi_bp
@@ -54,7 +54,7 @@ def create_app(config_name=None):
     
     # Register blueprints
     app.register_blueprint(health_bp)
-    app.register_blueprint(webhook_bp)
+
     app.register_blueprint(airtable_bp)
 
     app.register_blueprint(vapi_bp)
