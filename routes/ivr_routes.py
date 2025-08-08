@@ -23,8 +23,26 @@ class IVRService:
     """Service class for handling IVR functionality"""
     
     def __init__(self):
-        # Initialize Supabase client
-        self.supabase = create_client(Config.SUPABASE_URL, Config.SUPABASE_SERVICE_ROLE_KEY)
+        # Don't create the client yet - lazy initialization
+        self._supabase_client = None
+    
+    @property
+    def supabase(self):
+        """
+        Lazy-init Supabase client on first access.
+        Any errors creating the client will now happen at use-time,
+        not import-time.
+        """
+        if self._supabase_client is None:
+            try:
+                self._supabase_client = create_client(
+                    Config.SUPABASE_URL,
+                    Config.SUPABASE_SERVICE_ROLE_KEY
+                )
+            except Exception as e:
+                logger.error(f"Could not initialize Supabase client: {e}")
+                raise
+        return self._supabase_client
     
     def get_ivr_configuration(self, twilio_number: str) -> dict:
         """
@@ -415,8 +433,15 @@ class IVRService:
             logger.error(f"Error updating VAPI webhook event caller: {e}")
             return False
 
-# Initialize service
-ivr_service = IVRService()
+# Initialize service lazily
+ivr_service = None
+
+def get_ivr_service():
+    """Get the IVR service instance, creating it if needed."""
+    global ivr_service
+    if ivr_service is None:
+        ivr_service = IVRService()
+    return ivr_service
 
 def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: str, client_id: str, language_id: str):
     """
@@ -433,7 +458,8 @@ def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: st
         logger.info(f"Background: Processing caller lookup and Twilio call record for CallSid: {call_sid}")
         
         # Find or create caller record (this was blocking the TwiML response)
-        caller_id = ivr_service.find_or_create_caller(
+        service = get_ivr_service()
+        caller_id = service.find_or_create_caller(
             from_number,
             client_id,
             language_id
@@ -444,7 +470,7 @@ def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: st
             
             # Update VAPI webhook event with real caller_id
             try:
-                update_success = ivr_service.update_vapi_webhook_event_caller(vapi_event_id, caller_id)
+                update_success = service.update_vapi_webhook_event_caller(vapi_event_id, caller_id)
                 if update_success:
                     logger.info(f"Background: Successfully updated VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
                 else:
@@ -455,7 +481,7 @@ def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: st
             logger.error(f"Background: Failed to find/create caller record for: {from_number}")
         
         # Create Twilio call record in background
-        success = ivr_service.create_twilio_call_record(call_sid, vapi_event_id)
+        success = service.create_twilio_call_record(call_sid, vapi_event_id)
         
         if success:
             logger.info(f"Background: Successfully created Twilio call record for CallSid: {call_sid}")
@@ -478,7 +504,8 @@ def ivr_handler():
         logger.info(f"IVR call received - From: {from_number}, To: {to_number}, CallSid: {call_sid}")
         
         # Get IVR configuration
-        ivr_config = ivr_service.get_ivr_configuration(to_number)
+        service = get_ivr_service()
+        ivr_config = service.get_ivr_configuration(to_number)
         
         if not ivr_config:
             logger.error(f"No IVR configuration found for number: {to_number}")
@@ -621,7 +648,8 @@ def handle_selection():
         logger.info(f"StartTime from Twilio: {request.form.get('start_time')}")
         
         # Get IVR configuration again
-        ivr_config = ivr_service.get_ivr_configuration(to_number)
+        service = get_ivr_service()
+        ivr_config = service.get_ivr_configuration(to_number)
         
         if not ivr_config:
             logger.error(f"No IVR configuration found for number: {to_number}")
@@ -645,7 +673,7 @@ def handle_selection():
         logger.info(f"Caller {from_number} selected option {digits}: '{selected_option['text']}' in {selected_option['language_code']}")
         
         # Get transfer number
-        transfer_number = ivr_service.get_transfer_number(selected_option['language_id'])
+        transfer_number = service.get_transfer_number(selected_option['language_id'])
         
         if not transfer_number:
             logger.error(f"No transfer number found for language: {selected_option['language_id']}")
@@ -657,7 +685,7 @@ def handle_selection():
         
         # Create VAPI webhook event record (synchronous - must complete before TwiML response)
         # Create without caller field initially, will be updated in background
-        vapi_event_id = ivr_service.create_vapi_webhook_event(
+        vapi_event_id = service.create_vapi_webhook_event(
             from_number,
             None,  # No caller ID initially
             ivr_config['client_id']
@@ -758,7 +786,8 @@ def status_callback():
         
         # Look up the CallSid in our twilio_call table
         logger.info(f"Searching for CallSid {call_sid} in twilio_call table")
-        twilio_call_response = self.supabase.table("twilio_call").select("*").eq("call_sid", call_sid).execute()
+        service = get_ivr_service()
+        twilio_call_response = service.supabase.table("twilio_call").select("*").eq("call_sid", call_sid).execute()
         
         if twilio_call_response.error:
             logger.error(f"Error searching for call_sid '{call_sid}': {twilio_call_response.error}")
