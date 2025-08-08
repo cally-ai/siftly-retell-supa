@@ -116,17 +116,16 @@ class IVRService:
                 logger.info(f"IVR setup enabled for number {twilio_number}, processing multiple language options")
                 
                 # Step 3: Query client_ivr_language_configuration_language join table
-                language_options_response = self.supabase.table('client_ivr_language_configuration_language').select('*, language(*)').eq('client_ivr_language_configuration_id', client_ivr_language_id).execute()
+                language_options_response = self.supabase.table('client_ivr_language_configuration_language').select('*, language(*)').eq('client_ivr_language_configuration_id', client_ivr_language_id).order('order', desc=False).execute()
                 
                 if language_options_response.data:
-                    for i, language_option in enumerate(language_options_response.data, 1):
+                    for language_option in language_options_response.data:
                         language_data = language_option.get('language', {})
+                        order_number = language_option.get('order', 1)
                         
                         option_config = {
-                            'number': str(i),
-                            'text': language_data.get('twilio_language_name', f"Option {i}"),
-                            'language_code': language_data.get('twilio_language_code'),
-                            'audio_reply': language_data.get('audio_url_reply'),
+                            'number': str(order_number),
+                            'audio_reply': language_option.get('audio_url_reply'),
                             'language_id': language_data.get('id')
                         }
                         
@@ -651,7 +650,7 @@ def handle_selection():
             response.say("Invalid selection. Please try again.", voice='alice')
             return Response(str(response), mimetype='text/xml')
         
-        logger.info(f"Caller {from_number} selected option {digits}: '{selected_option['text']}' in {selected_option['language_code']}")
+        logger.info(f"Caller {from_number} selected option {digits}")
         
         # Get transfer number
         transfer_number = service.get_transfer_number(selected_option['language_id'])
