@@ -813,9 +813,11 @@ def status_callback():
             record = twilio_call_match[0]
             record_id = record['id']
             
-            # Check if the IVR record has vapi_webhook_event, if not, we need to create one
-            record_fields = record.get('fields', {})
-            existing_vapi_webhook_event = record_fields.get('vapi_webhook_event', [])
+            # Check if the IVR record has vapi_webhook_event_id, if not, we need to create one
+            existing_vapi_webhook_event_id = record.get('vapi_webhook_event_id')
+            
+            # Convert to list format for compatibility with existing logic
+            existing_vapi_webhook_event = [existing_vapi_webhook_event_id] if existing_vapi_webhook_event_id else []
             
             if not existing_vapi_webhook_event:
                 logger.info(f"Branch 1: IVR record missing vapi_webhook_event, creating one")
@@ -943,12 +945,11 @@ def status_callback():
                 if child_call_details.forwarded_from:
                     child_call_data['ForwardedFrom'] = child_call_details.forwarded_from
                 
-                # Get vapi_webhook_event from parent record
-                parent_fields = record.get('fields', {})
-                vapi_webhook_event = parent_fields.get('vapi_webhook_event', [])
-                if vapi_webhook_event:
-                    child_call_data['vapi_webhook_event'] = vapi_webhook_event
-                    logger.info(f"Branch 1: Linking child call to same vapi_webhook_event: {vapi_webhook_event}")
+                # Get vapi_webhook_event_id from parent record
+                vapi_webhook_event_id = record.get('vapi_webhook_event_id')
+                if vapi_webhook_event_id:
+                    child_call_data['vapi_webhook_event'] = [vapi_webhook_event_id]  # Convert to list for compatibility
+                    logger.info(f"Branch 1: Linking child call to same vapi_webhook_event_id: {vapi_webhook_event_id}")
                 
                 logger.info(f"Branch 1: Creating child call record with data: {child_call_data}")
                 
@@ -1021,9 +1022,8 @@ def status_callback():
                 matching_vapi_records = []
                 
                 for record in matching_records:
-                    record_fields = record.get('fields', {})
-                    record_type = record_fields.get('Type')
-                    record_end_time = record_fields.get('EndTime')
+                    record_type = record.get('call_type')
+                    record_end_time = record.get('end_time')
                     
                     # Check if it's a VAPI record
                     if record_type == 'vapi' and record_end_time:
@@ -1049,14 +1049,12 @@ def status_callback():
                 if matching_vapi_records:
                     # Take the first matching record (closest in time)
                     matching_vapi_record = matching_vapi_records[0]
-                    matching_vapi_fields = matching_vapi_record.get('fields', {})
-                    vapi_webhook_event = matching_vapi_fields.get('vapi_webhook_event', [])
+                    vapi_webhook_event_id = matching_vapi_record.get('vapi_webhook_event_id')
                     
-                    logger.info(f"Branch 1: Matching VAPI record fields: {matching_vapi_fields}")
-                    logger.info(f"Branch 1: vapi_webhook_event field value: {vapi_webhook_event}")
+                    logger.info(f"Branch 1: Matching VAPI record: {matching_vapi_record}")
+                    logger.info(f"Branch 1: vapi_webhook_event_id value: {vapi_webhook_event_id}")
                     
                     # Get the vapi_webhook_event from our IVR record (the one we just updated)
-                    ivr_record_fields = record.get('fields', {})
                     ivr_vapi_webhook_event = existing_vapi_webhook_event  # Use the variable we set earlier
                     
                     logger.info(f"Branch 1: IVR record vapi_webhook_event: {ivr_vapi_webhook_event}")
@@ -1098,8 +1096,7 @@ def status_callback():
                             vapi_event_record = None
                         
                         if vapi_event_record:
-                            vapi_event_fields = vapi_event_record.get('fields', {})
-                            call_id = vapi_event_fields.get('call_id')
+                            call_id = vapi_event_record.get('call_id')
                             
                             if call_id:
                                 logger.info(f"Branch 1: Found call_id {call_id} in vapi_webhook_event record")
