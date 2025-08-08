@@ -126,7 +126,6 @@ class IVRService:
                             'number': str(i),
                             'text': language_data.get('twilio_language_name', f"Option {i}"),
                             'language_code': language_data.get('twilio_language_code'),
-                            'reply': language_data.get('reply'),
                             'audio_reply': language_data.get('audio_url_reply'),
                             'language_id': language_data.get('id')
                         }
@@ -533,27 +532,9 @@ def ivr_handler():
                 if audio_url:
                     gather.play(audio_url)
                 else:
-                    logger.warning(f"Audio URL is empty for IVR menu")
-                    # Fallback to text-to-speech
-                    for option in ivr_config['options']:
-                        if option['text'] and option['language_code'] and ivr_config['twilio_voice']:
-                            logger.info(f"Adding IVR option {option['number']}: '{option['text']}' in {option['language_code']}")
-                            gather.say(
-                                option['text'],
-                                voice=ivr_config['twilio_voice'],
-                                language=option['language_code']
-                            )
+                    logger.error(f"Audio URL is empty for IVR menu - no fallback available")
             else:
-                logger.info(f"No audio URL found, using text-to-speech for IVR menu")
-                # Fallback to text-to-speech if no audio URL
-                for option in ivr_config['options']:
-                    if option['text'] and option['language_code'] and ivr_config['twilio_voice']:
-                        logger.info(f"Adding IVR option {option['number']}: '{option['text']}' in {option['language_code']}")
-                        gather.say(
-                            option['text'],
-                            voice=ivr_config['twilio_voice'],
-                            language=option['language_code']
-                        )
+                logger.error(f"No audio URL found for IVR menu - no fallback available")
             
             # Add fallback if no digits pressed
             response.append(gather)
@@ -719,22 +700,9 @@ def handle_selection():
             if audio_reply_url:
                 response.play(audio_reply_url)
             else:
-                logger.warning(f"Audio reply URL is empty")
-                # Fallback to text-to-speech
-                if selected_option['reply'] and selected_option['language_code'] and ivr_config['twilio_voice']:
-                    logger.info(f"Playing text reply message: '{selected_option['reply']}' in {selected_option['language_code']}")
-                    response.say(
-                        selected_option['reply'],
-                        voice=ivr_config['twilio_voice'],
-                        language=selected_option['language_code']
-                    )
-        elif selected_option['reply'] and selected_option['language_code'] and ivr_config['twilio_voice']:
-            logger.info(f"Playing text reply message: '{selected_option['reply']}' in {selected_option['language_code']}")
-            response.say(
-                selected_option['reply'],
-                voice=ivr_config['twilio_voice'],
-                language=selected_option['language_code']
-            )
+                logger.error(f"Audio reply URL is empty - no fallback available")
+        else:
+            logger.error(f"No audio reply URL found for selected option - no fallback available")
         
         # Transfer the call
         dial = response.dial(
