@@ -471,141 +471,7 @@ class VAPIWebhookService:
 # Initialize service
 vapi_service = VAPIWebhookService()
 
-def assistant_selector():
-    """Handle VAPI AI assistant selector webhook"""
-    try:
-        # Get the JSON data from the request
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({'error': 'No JSON data received'}), 400
-        
-        # Validate the webhook structure
-        message = data.get('message', {})
-        message_type = message.get('type')
-        call_data = message.get('call', {})
-        
-        # Handle different VAPI message types
-        if message_type == 'assistant-request':
-            # This is the main message we need to handle
-            if not call_data:
-                logger.error("No call data in webhook")
-                return jsonify({'error': 'No call data provided'}), 400
-            
-            # Extract phone number from VAPI call data
-            # VAPI uses call.customer.number instead of call.from.phoneNumber
-            customer_data = call_data.get('customer', {})
-            from_number = customer_data.get('number')
-            
-            if not from_number:
-                logger.error("No customer phone number in call data")
-                return jsonify({'error': 'No customer phone number provided'}), 400
-            
-            # Extract phone_number_id if available in the call data
-            phone_number_id = call_data.get('phone_number_id')
-            
-            logger.info(f"VAPI assistant request for: {from_number} (phone_number_id: {phone_number_id})")
-            
-            # Get assistant configuration
-            assistant_config = vapi_service.get_assistant_configuration(from_number, phone_number_id)
-            
-            if not assistant_config:
-                logger.warning(f"No assistant configuration found for: {from_number}")
-                return jsonify({'error': 'No assistant configuration found'}), 404
-            
-            logger.info(f"Returning assistant configuration for {from_number}")
-            return jsonify(assistant_config), 200
-            
-        elif message_type in ['status-update', 'speech-update', 'conversation-update', 'end-of-call-report']:
-            # These are informational updates - just acknowledge them
-            logger.info(f"Received VAPI {message_type} webhook")
-            return jsonify({'status': 'acknowledged'}), 200
-            
-        else:
-            logger.warning(f"Unknown message type: {message_type}")
-            return jsonify({'error': 'Unknown message type'}), 400
-        
-    except ValueError as e:
-        logger.error(f"Validation error: {e}")
-        return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        logger.error(f"Error processing VAPI webhook: {e}")
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
-@vapi_bp.route('/assistant-override-variable-values', methods=['POST'])
-def assistant_override_variable_values():
-    """Handle VAPI AI assistant override variable values webhook"""
-    try:
-        # Get the JSON data from the request first to check message type
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({'error': 'No JSON data received'}), 400
-        
-        # Validate the webhook structure
-        message = data.get('message', {})
-        message_type = message.get('type')
-        call_data = message.get('call', {})
-        
-        # Skip logging for conversation-update messages to reduce log bloat
-        if message_type == 'conversation-update':
-            return jsonify({'status': 'acknowledged'}), 200
-        
-        # Handle different VAPI message types
-        if message_type == 'status-update':
-            # Only process when status is "in-progress"
-            status = message.get('status')
-            if status != 'in-progress':
-                logger.info(f"Status update received but not 'in-progress': {status}")
-                return jsonify({'status': 'acknowledged'}), 200
-            
-            # This is the main message we need to handle
-            if not call_data:
-                logger.error("No call data in webhook")
-                return jsonify({'error': 'No call data provided'}), 400
-            
-            # Extract phone number from VAPI call data
-            # VAPI uses call.customer.number instead of call.from.phoneNumber
-            customer_data = call_data.get('customer', {})
-            from_number = customer_data.get('number')
-            
-            if not from_number:
-                logger.error("No customer phone number in call data")
-                return jsonify({'error': 'No customer phone number provided'}), 400
-            
-            # Extract phone_number_id if available in the call data
-            phone_number_id = call_data.get('phone_number_id')
-            
-            logger.info(f"VAPI override request for: {from_number} (status: in-progress, phone_number_id: {phone_number_id})")
-            
-            # Get dynamic variables only (no assistant lookup needed)
-            dynamic_variables = vapi_service._get_dynamic_variables_for_caller(from_number, phone_number_id)
-            
-            if not dynamic_variables:
-                logger.warning(f"No dynamic variables found for: {from_number}")
-                return jsonify({'error': 'No dynamic variables found'}), 404
-            
-            # Return only the workflowOverrides (no assistantId)
-            response = {
-                "workflowOverrides": {
-                    "variableValues": dynamic_variables
-                }
-            }
-            
-            logger.info(f"Returning override variables for {from_number}")
-            return jsonify(response), 200
-            
-        elif message_type in ['status-update', 'speech-update', 'end-of-call-report']:
-            # Acknowledge other message types
-            logger.info(f"Received VAPI {message_type} webhook")
-            return jsonify({'status': 'acknowledged'}), 200
-        else:
-            logger.warning(f"Invalid message type: {message_type}")
-            return jsonify({'error': 'Invalid message type'}), 400
-            
-    except Exception as e:
-        logger.error(f"Error processing VAPI override webhook: {e}")
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 @vapi_bp.route('/debug', methods=['GET'])
 def vapi_debug():
@@ -617,7 +483,7 @@ def vapi_debug():
         debug_info = {
             "airtable_configured": airtable_configured,
             "vapi_workflow_table_id": Config.TABLE_ID_VAPI_WORKFLOW,
-            "webhook_url": "https://siftly.onrender.com/vapi/assistant-selector"
+            "webhook_url": "https://siftly.onrender.com/vapi/get-client-dynamic-variables"
         }
         
         return debug_info, 200
