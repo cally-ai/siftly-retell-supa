@@ -323,71 +323,7 @@ class VAPIWebhookService:
             logger.error(f"Error finding VAPI workflow by workflow_id: {e}")
             return None
     
-    def _link_vapi_event_to_caller(self, caller_record_id: str, vapi_event_record_id: str) -> bool:
-        """
-        Link a VAPI webhook event record to a caller record
-        
-        Args:
-            caller_record_id: The ID of the caller record
-            vapi_event_record_id: The ID of the VAPI webhook event record
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Update the caller record to link to the VAPI webhook event
-            update_data = {
-                'vapi_webhook_event': [vapi_event_record_id]
-            }
-            
-            result = self.airtable_service.update_record_in_table(
-                table_name="tbl3mjOWELyIG2m6o",  # caller table
-                record_id=caller_record_id,
-                data=update_data
-            )
-            
-            if result:
-                return True
-            else:
-                logger.error(f"Failed to link VAPI event {vapi_event_record_id} to caller {caller_record_id}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error linking VAPI event to caller: {e}")
-            return False
-    
-    def _link_vapi_event_to_workflow(self, workflow_record_id: str, vapi_event_record_id: str) -> bool:
-        """
-        Link a VAPI webhook event record to a VAPI workflow record
-        
-        Args:
-            workflow_record_id: The ID of the VAPI workflow record
-            vapi_event_record_id: The ID of the VAPI webhook event record
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Update the VAPI workflow record to link to the VAPI webhook event
-            update_data = {
-                'vapi_webhook_event': [vapi_event_record_id]
-            }
-            
-            result = self.airtable_service.update_record_in_table(
-                table_name=Config.TABLE_ID_VAPI_WORKFLOW,
-                record_id=workflow_record_id,
-                data=update_data
-            )
-            
-            if result:
-                return True
-            else:
-                logger.error(f"Failed to link VAPI event {vapi_event_record_id} to workflow {workflow_record_id}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error linking VAPI event to workflow: {e}")
-            return False
+
 
 # Initialize service
 vapi_service = VAPIWebhookService()
