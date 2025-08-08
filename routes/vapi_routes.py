@@ -4,9 +4,9 @@ VAPI AI webhook route handlers
 from flask import Blueprint, request, jsonify
 from typing import Dict, Any, Optional
 from config import Config
-from services.airtable_service import AirtableService
+from supabase import create_client
 from utils.logger import get_logger
-import json
+
 import requests
 
 logger = get_logger(__name__)
@@ -18,7 +18,20 @@ class VAPIWebhookService:
     """Service for handling VAPI AI webhook operations"""
     
     def __init__(self):
-        self.airtable_service = AirtableService()
+        self._supabase = None
+
+    @property
+    def supabase(self):
+        if self._supabase is None:
+            try:
+                self._supabase = create_client(
+                    Config.SUPABASE_URL,
+                    Config.SUPABASE_SERVICE_ROLE_KEY
+                )
+            except Exception as e:
+                logger.error(f"Could not init Supabase client: {e}")
+                raise
+        return self._supabase
     
 
     
@@ -39,35 +52,26 @@ class VAPIWebhookService:
         try:
             logger.info(f"Looking up caller language for phone_number_id: {phone_number_id}")
             
-            # Search in twilio_number table for matching vapi_phone_number_id
-            twilio_records = self.airtable_service.search_records_in_table(
-                table_name="tbl0PeZoX2qgl74ZT",  # twilio_number table
-                field="vapi_phone_number_id",
-                value=phone_number_id
-            )
+            # Single joined query to get language code directly
+            resp = self.supabase\
+                .table('twilio_number')\
+                .select('language(vapi_language_code)')\
+                .eq('vapi_phone_number_id', phone_number_id)\
+                .limit(1)\
+                .execute()
             
-            if not twilio_records:
+            if not resp.data:
                 logger.warning(f"No twilio_number record found for phone_number_id: {phone_number_id}")
                 return None
             
-            twilio_record = twilio_records[0]
-            language_linked_ids = twilio_record.get('fields', {}).get('language', [])
-            
-            if not language_linked_ids:
-                logger.warning(f"No language linked to twilio_number record for phone_number_id: {phone_number_id}")
+            # Validate response structure
+            if resp.error:
+                logger.error(f"Supabase error: {resp.error}")
                 return None
             
-            # Get the language record to extract vapi_language_code
-            language_record = self.airtable_service.get_record_from_table(
-                table_name="tblT79Xju3vLxNipr",  # language table
-                record_id=language_linked_ids[0]
-            )
-            
-            if not language_record:
-                logger.warning(f"Language record not found for ID: {language_linked_ids[0]}")
-                return None
-            
-            vapi_language_code = language_record.get('fields', {}).get('vapi_language_code')
+            # Extract vapi_language_code from the joined response
+            language_data = resp.data[0].get('language', {})
+            vapi_language_code = language_data.get('vapi_language_code')
             
             if vapi_language_code:
                 logger.info(f"Found caller language: {vapi_language_code} for phone_number_id: {phone_number_id}")
@@ -103,7 +107,7 @@ class VAPIWebhookService:
                 "Authorization": Config.VAPI_API_KEY
             }
             
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=5)
             
             if response.status_code != 200:
                 logger.error(f"VAPI API call failed with status {response.status_code}: {response.text}")
@@ -134,7 +138,7 @@ class VAPIWebhookService:
                 'from_number': call_info.get('variableValues', {}).get('customer', {}).get('number', ''),
                 'vapi_workflow_number': call_info.get('variableValues', {}).get('phoneNumber', {}).get('number', ''),
                 'analysis_summary': call_info.get('analysis', {}).get('summary', ''),
-                'analysis_succes_evaluation': call_info.get('analysis', {}).get('successEvaluation', '')
+                'analysis_success_evaluation': call_info.get('analysis', {}).get('successEvaluation', '')
             }
             
             logger.info(f"Successfully extracted VAPI call data for call_id: {call_id}")
@@ -155,14 +159,19 @@ class VAPIWebhookService:
             Caller record if found, None otherwise
         """
         try:
-            caller_records = self.airtable_service.search_records_in_table(
-                table_name="tbl3mjOWELyIG2m6o",  # caller table
-                field="phone_number", 
-                value=phone_number
-            )
+            resp = self.supabase\
+                .table('caller')\
+                .select('*')\
+                .eq('phone_number', phone_number)\
+                .limit(1)\
+                .execute()
             
-            if caller_records:
-                return caller_records[0]
+            if resp.error:
+                logger.error(f"Supabase error: {resp.error}")
+                return None
+            
+            if resp.data:
+                return resp.data[0]
             else:
                 return None
                 
@@ -181,18 +190,19 @@ class VAPIWebhookService:
             VAPI workflow record if found, None otherwise
         """
         try:
-            if not Config.TABLE_ID_VAPI_WORKFLOW:
-                logger.error("TABLE_ID_VAPI_WORKFLOW is not configured")
+            resp = self.supabase\
+                .table('vapi_workflow')\
+                .select('*')\
+                .eq('workflow_id', workflow_id)\
+                .limit(1)\
+                .execute()
+            
+            if resp.error:
+                logger.error(f"Supabase error: {resp.error}")
                 return None
             
-            workflow_records = self.airtable_service.search_records_in_table(
-                table_name=Config.TABLE_ID_VAPI_WORKFLOW,
-                field="workflow_id", 
-                value=workflow_id
-            )
-            
-            if workflow_records:
-                return workflow_records[0]
+            if resp.data:
+                return resp.data[0]
             else:
                 return None
                 
@@ -211,12 +221,11 @@ vapi_service = VAPIWebhookService()
 def vapi_debug():
     """Debug endpoint to check VAPI webhook configuration"""
     try:
-        # Check if Airtable is configured
-        airtable_configured = vapi_service.airtable_service.is_configured()
+        # Check if Supabase is configured
+        supabase_configured = bool(Config.SUPABASE_URL and Config.SUPABASE_SERVICE_ROLE_KEY)
         
         debug_info = {
-            "airtable_configured": airtable_configured,
-            "vapi_workflow_table_id": Config.TABLE_ID_VAPI_WORKFLOW,
+            "supabase_configured": supabase_configured,
             "webhook_url": "https://siftly.onrender.com/vapi/get-client-dynamic-variables"
         }
         
@@ -278,90 +287,56 @@ def get_client_dynamic_variables():
             logger.error(f"Error parsing time format: {e}")
             return jsonify({'error': f'Invalid time format: {time_api_request}'}), 400
         
-        # Step 1: Find matching vapi_webhook_event record
+        # Find matching vapi_webhook_event record with time window
         logger.info(f"Searching for vapi_webhook_event with from_number: {caller_number}")
         
-        vapi_service = VAPIWebhookService()
-        vapi_records = vapi_service.airtable_service.search_records_in_table(
-            table_name="vapi_webhook_event",
-            field="from_number",
-            value=caller_number
-        )
+        from datetime import timedelta
         
-        if not vapi_records:
+        # Build ISO bounds (two minutes either side of utc_time)
+        lower = (utc_time - timedelta(minutes=2)).isoformat()
+        upper = (utc_time + timedelta(minutes=2)).isoformat()
+        
+        resp = vapi_service.supabase\
+            .table('vapi_webhook_event')\
+            .select('*')\
+            .eq('from_number', caller_number)\
+            .gte('transferred_time', lower)\
+            .lte('transferred_time', upper)\
+            .order('transferred_time', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if not resp.data:
             logger.warning(f"No vapi_webhook_event records found for caller: {caller_number}")
             return jsonify({'error': 'No matching vapi_webhook_event found'}), 404
         
-        # Step 2: Filter by transferred_time within 2 minutes of the API request time
-        matching_records = []
-        for record in vapi_records:
-            transferred_time = record.get('fields', {}).get('transferred_time')
-            if transferred_time:
-                try:
-                    # Parse the transferred_time (should be in ISO format)
-                    transferred_dt = datetime.fromisoformat(transferred_time.replace('Z', '+00:00'))
-                    # Calculate time difference
-                    time_diff = abs((utc_time - transferred_dt).total_seconds())
-                    
-                    # Check if within 2 minutes (120 seconds)
-                    if time_diff <= 120:
-                        matching_records.append({
-                            'record': record,
-                            'transferred_time': transferred_time,
-                            'time_diff': time_diff
-                        })
-                        logger.info(f"Found matching record with transferred_time: {transferred_time}, time_diff: {time_diff}s")
-                        
-                except Exception as e:
-                    logger.warning(f"Error parsing transferred_time {transferred_time}: {e}")
-                    continue
+        event = resp.data[0]
+        logger.info(f"Found matching event with transferred_time: {event.get('transferred_time')}")
         
-        if not matching_records:
-            logger.warning(f"No vapi_webhook_event records within 2 minutes for caller: {caller_number}")
-            return jsonify({'error': 'No matching vapi_webhook_event within time window'}), 404
-        
-        # Step 3: Get the record with newest transferred_time
-        matching_records.sort(key=lambda x: x['transferred_time'], reverse=True)
-        call_id_match = matching_records[0]['record']
-        
-        logger.info(f"Selected record with newest transferred_time: {matching_records[0]['transferred_time']}")
-        
-        # Step 4: Extract client from the matched record
-        client_linked_ids = call_id_match.get('fields', {}).get('client', [])
-        if not client_linked_ids:
-            logger.error(f"No client linked to vapi_webhook_event record")
+        # Extract client_id from the matched record
+        client_id = event.get('client_id')
+        if not client_id:
+            logger.error(f"No client_id in vapi_webhook_event record")
             return jsonify({'error': 'No client linked to matched record'}), 500
         
-        client_record_id = client_linked_ids[0]
-        logger.info(f"Found client record ID: {client_record_id}")
+        logger.info(f"Found client_id: {client_id}")
         
-        # Step 5: Get client's twilio_number
-        client_record = vapi_service.airtable_service.get_record_from_table(
-            table_name="client",
-            record_id=client_record_id
-        )
+        # Get client's twilio_number from twilio_number table
+        num_resp = vapi_service.supabase\
+            .table('twilio_number')\
+            .select('twilio_number')\
+            .eq('client_id', client_id)\
+            .limit(1)\
+            .execute()
         
-        if not client_record:
-            logger.error(f"Client record not found: {client_record_id}")
-            return jsonify({'error': 'Client record not found'}), 500
+        if not num_resp.data:
+            logger.error(f"No twilio_number found for client_id: {client_id}")
+            return jsonify({'error': 'No twilio_number found for client'}), 500
         
-        client_twilio_number = client_record.get('fields', {}).get('twilio_number')
-        if not client_twilio_number:
-            logger.error(f"No twilio_number found in client record: {client_record_id}")
-            return jsonify({'error': 'No twilio_number in client record'}), 500
-        
-        # Handle case where twilio_number is a list (linked record)
-        if isinstance(client_twilio_number, list):
-            if len(client_twilio_number) > 0:
-                client_twilio_number = client_twilio_number[0]  # Take first element
-                logger.info(f"Extracted twilio_number from list: {client_twilio_number}")
-            else:
-                logger.error(f"Empty twilio_number list in client record: {client_record_id}")
-                return jsonify({'error': 'Empty twilio_number list in client record'}), 500
-        
+        client_twilio_number = num_resp.data[0]['twilio_number']
         logger.info(f"Found client twilio_number: {client_twilio_number}")
         
-        # Step 6: Get dynamic variables from cache using client_twilio_number
+        # Get dynamic variables from cache using client_twilio_number
         from services.webhook_service import webhook_service
         dynamic_variables = webhook_service._get_customer_data(client_twilio_number)
         
@@ -372,7 +347,7 @@ def get_client_dynamic_variables():
                 "accountType": "unknown"
             }
         
-        # Step 6.5: Add caller_language dynamic variable if phone_number_id is provided
+        # Add caller_language dynamic variable if phone_number_id is provided
         phone_number_id = data.get('phone_number_id')
         if phone_number_id:
             caller_language = vapi_service._get_caller_language_from_phone_id(phone_number_id)
@@ -382,8 +357,8 @@ def get_client_dynamic_variables():
             else:
                 logger.warning(f"Could not determine caller_language for phone_number_id: {phone_number_id}")
         
-        # Step 7: Return call_id and dynamic variables as flat structure
-        call_id = call_id_match.get('fields', {}).get('call_id')
+        # Return call_id and dynamic variables as flat structure
+        call_id = event.get('call_id')
         
         # Create flat response with call_id and all dynamic variables at root level
         response_data = {
@@ -431,17 +406,19 @@ def vapi_new_incoming_call_event():
             logger.warning(f"Failed to retrieve call data for call_id: {call_id}")
             return jsonify({'error': 'Failed to retrieve call data'}), 500
         
-        # Save detailed call data to Airtable
+        # Save detailed call data to Supabase
         try:
-            # Prepare fields for Airtable using the extracted call data and webhook payload
-            airtable_fields = {
+            from datetime import datetime, timedelta
+            
+            # Prepare payload for Supabase using the extracted call data and webhook payload
+            payload = {
                 'call_id': call_data.get('id', ''),
                 'phoneNumberId': call_data.get('phoneNumberId', ''),
                 'type': call_data.get('type', ''),
-                'startedAt': call_data.get('startedAt', ''),
-                'endedAt': call_data.get('endedAt', ''),
+                'started_at': call_data.get('startedAt', ''),
+                'ended_at': call_data.get('endedAt', ''),
                 'transcript': call_data.get('transcript', ''),
-                'recordingUrl': call_data.get('recordingUrl', ''),
+                'recording_url': call_data.get('recordingUrl', ''),
                 'summary': call_data.get('summary', ''),
                 'orgId': call_data.get('orgId', ''),
                 'status': call_data.get('status', ''),
@@ -450,158 +427,102 @@ def vapi_new_incoming_call_event():
                 'from_number': from_number,  # From webhook payload
                 'vapi_language_workflow_number': vapi_workflow_number,  # From webhook payload
                 'analysis_summary': call_data.get('analysis_summary', ''),
-                'analysis_succes_evaluation': call_data.get('analysis_succes_evaluation', '')
+                'analysis_success_evaluation': call_data.get('analysis_success_evaluation', '')
             }
             
-            # Add caller and client linked fields if we can find them
+            # Add caller_id if we can find the caller
             if from_number:
                 try:
-                    # Look for existing caller record with matching phone number
                     caller_record = vapi_service._find_caller_by_phone_number(from_number)
-                    
                     if caller_record:
-                        caller_record_id = caller_record.get('id')
-                        airtable_fields['caller'] = [caller_record_id]
-                        logger.info(f"Adding caller link: {caller_record_id} for {from_number}")
-                        
-                        # Also try to get the client from the caller record
-                        caller_fields = caller_record.get('fields', {})
-                        client_link = caller_fields.get('client', [])
-                        if client_link:
-                            airtable_fields['client'] = client_link
-                            logger.info(f"Adding client link: {client_link} from caller record")
-                        
+                        payload['caller_id'] = caller_record['id']
+                        logger.info(f"Adding caller_id: {caller_record['id']} for {from_number}")
                 except Exception as link_error:
                     logger.error(f"Error finding caller for linking: {link_error}")
-                    # Continue without caller/client links if lookup fails
             
-            # Add VAPI workflow linked field if we can find it
+            # Add vapi_workflow_id if we can find the workflow
             workflow_id = call_data.get('workflowId', '')
             if workflow_id:
                 try:
-                    # Look for existing VAPI workflow record with matching workflow_id
                     workflow_record = vapi_service._find_vapi_workflow_by_workflow_id(workflow_id)
-                    
                     if workflow_record:
-                        workflow_record_id = workflow_record.get('id')
-                        airtable_fields['vapi_workflow'] = [workflow_record_id]
-                        logger.info(f"Adding VAPI workflow link: {workflow_record_id} for workflow_id: {workflow_id}")
-                        
+                        payload['vapi_workflow_id'] = workflow_record['id']
+                        logger.info(f"Adding vapi_workflow_id: {workflow_record['id']} for workflow_id: {workflow_id}")
                 except Exception as link_error:
                     logger.error(f"Error finding VAPI workflow for linking: {link_error}")
-                    # Continue without workflow link if lookup fails
             
-            logger.info(f"VAPI creating record with fields: {airtable_fields}")
+            logger.info(f"VAPI preparing payload: {payload}")
             
-            # Check for existing records that match our criteria
-            # Use the from_number that was already extracted from the webhook payload
-            # (don't re-extract from call_data as it might not have the customer info)
+            # Search for existing records that match our criteria
             started_at = call_data.get('startedAt', '')
             
-            logger.info(f"VAPI matching search - from_number: {from_number}, started_at: {started_at}")
-            logger.info(f"VAPI call_data customer: {call_data.get('customer', {})}")
-            logger.info(f"VAPI call_data keys: {list(call_data.keys())}")
-            
             if from_number and started_at:
-                # Convert started_at to datetime for comparison
-                from datetime import datetime
                 try:
+                    # Convert started_at to datetime for comparison
                     started_at_dt = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
                     logger.info(f"VAPI started_at datetime: {started_at_dt}")
                     
-                    # Search for records with empty call_id and matching from_number
-                    existing_records = vapi_service.airtable_service.search_records_in_table(
-                        table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                        field="from_number",
-                        value=from_number
-                    )
+                    # Build ISO bounds (two minutes either side of started_at_dt)
+                    lower = (started_at_dt - timedelta(minutes=2)).isoformat()
+                    upper = (started_at_dt + timedelta(minutes=2)).isoformat()
                     
-                    logger.info(f"VAPI found {len(existing_records)} existing records with from_number: {from_number}")
+                    # Search for existing records with empty call_id and matching criteria
+                    resp = vapi_service.supabase\
+                        .table('vapi_webhook_event')\
+                        .select('*')\
+                        .eq('from_number', from_number)\
+                        .is_('call_id', None)\
+                        .gte('transferred_time', lower)\
+                        .lte('transferred_time', upper)\
+                        .order('transferred_time', desc=True)\
+                        .limit(1)\
+                        .execute()
                     
-                    # Filter records that have empty call_id and are within 2 minutes
-                    matching_records = []
-                    for i, record in enumerate(existing_records):
-                        record_fields = record.get('fields', {})
-                        call_id = record_fields.get('call_id', '')
-                        created_time = record_fields.get('created_time', '')
-                        
-                        logger.info(f"VAPI checking record {i+1}: id={record['id']}, call_id='{call_id}', created_time='{created_time}'")
-                        
-                        # Check if call_id is empty
-                        if not call_id or call_id == '':
-                            logger.info(f"VAPI record {record['id']} has empty call_id, checking time")
-                            # Check if transferred_time is within 2 minutes of started_at
-                            transferred_time = record_fields.get('transferred_time', '')
-                            if transferred_time:
-                                try:
-                                    transferred_dt = datetime.fromisoformat(transferred_time.replace('Z', '+00:00'))
-                                    time_diff = abs((started_at_dt - transferred_dt).total_seconds())
-                                    
-                                    logger.info(f"VAPI time comparison: transferred_dt={transferred_dt}, time_diff={time_diff}s")
-                                    
-                                    if time_diff <= 120:  # 2 minutes = 120 seconds
-                                        matching_records.append(record)
-                                        logger.info(f"VAPI record {record['id']} MATCHES criteria (time_diff={time_diff}s)")
-                                    else:
-                                        logger.info(f"VAPI record {record['id']} REJECTED (time_diff={time_diff}s > 120s)")
-                                except Exception as e:
-                                    logger.warning(f"Error parsing transferred_time {transferred_time}: {e}")
-                            else:
-                                logger.info(f"VAPI record {record['id']} has no transferred_time")
-                        else:
-                            logger.info(f"VAPI record {record['id']} REJECTED (has call_id: '{call_id}')")
+                    existing = resp.data[0] if resp.data else None
                     
-                    logger.info(f"VAPI found {len(matching_records)} matching records")
-                    
-                    # If we have matching records, update the newest one
-                    if matching_records:
-                        # Sort by transferred_time (newest first) and take the first one
-                        matching_records.sort(key=lambda x: x.get('fields', {}).get('transferred_time', ''), reverse=True)
-                        newest_record = matching_records[0]
-                        
-                        logger.info(f"VAPI updating newest matching record: {newest_record['id']}")
-                        
+                    if existing:
+                        logger.info(f"VAPI updating existing record: {existing['id']}")
                         # Update the existing record
-                        record = vapi_service.airtable_service.update_record_in_table(
-                            table_name=Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                            record_id=newest_record['id'],
-                            data=airtable_fields
-                        )
-                        logger.info(f"VAPI updated existing record: {newest_record['id']}")
+                        result = vapi_service.supabase\
+                            .table('vapi_webhook_event')\
+                            .update(payload)\
+                            .eq('id', existing['id'])\
+                            .execute()
+                        logger.info(f"VAPI updated existing record: {existing['id']}")
                     else:
-                        # No matching records found, create new one
                         logger.info(f"VAPI no matching records found for {from_number}, creating new record")
-                        record = vapi_service.airtable_service.create_record_in_table(
-                            Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                            airtable_fields
-                        )
-                        logger.info(f"VAPI created new record: {record['id'] if record else 'failed'}")
+                        # Create new record
+                        result = vapi_service.supabase\
+                            .table('vapi_webhook_event')\
+                            .insert(payload)\
+                            .execute()
+                        logger.info(f"VAPI created new record")
                         
                 except Exception as e:
                     logger.error(f"VAPI error processing datetime comparison: {e}")
                     # Fallback to creating new record
-                    record = vapi_service.airtable_service.create_record_in_table(
-                        Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                        airtable_fields
-                    )
-                    logger.info(f"VAPI created new record (fallback): {record['id'] if record else 'failed'}")
+                    result = vapi_service.supabase\
+                        .table('vapi_webhook_event')\
+                        .insert(payload)\
+                        .execute()
+                    logger.info(f"VAPI created new record (fallback)")
             else:
                 # Missing required data, create new record
                 logger.warning(f"VAPI missing from_number or started_at, creating new record")
-                record = vapi_service.airtable_service.create_record_in_table(
-                    Config.TABLE_ID_VAPI_WEBHOOK_EVENT,
-                    airtable_fields
-                )
-                logger.info(f"VAPI created new record: {record['id'] if record else 'failed'}")
+                result = vapi_service.supabase\
+                    .table('vapi_webhook_event')\
+                    .insert(payload)\
+                    .execute()
+                logger.info(f"VAPI created new record")
             
-            if record:
-                logger.info(f"Successfully created VAPI webhook event record: {record.get('id')}")
+            if result and result.data:
+                logger.info(f"Successfully saved VAPI webhook event record")
             else:
-                logger.warning("Failed to save detailed call data to Airtable")
+                logger.warning("Failed to save detailed call data to Supabase")
                 
         except Exception as e:
-            logger.error(f"Error saving detailed call data to Airtable: {e}")
-            # Continue processing even if Airtable save fails
+            logger.error(f"Error saving detailed call data to Supabase: {e}")
+            # Continue processing even if Supabase save fails
         
         # Acknowledge the webhook with a success response
         return jsonify({'status': 'success', 'message': 'New incoming call event received and processed'}), 200
