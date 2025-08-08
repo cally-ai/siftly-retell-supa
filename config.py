@@ -21,6 +21,8 @@ print(f"TWILIO_ACCOUNT_SID: {os.getenv('TWILIO_ACCOUNT_SID', 'NOT SET')}")
 print(f"TWILIO_AUTH_TOKEN: {os.getenv('TWILIO_AUTH_TOKEN', 'NOT SET')}")
 print(f"OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY', 'NOT SET')}")
 print(f"DEEPGRAM_API_KEY: {os.getenv('DEEPGRAM_API_KEY', 'NOT SET')}")
+print(f"SUPABASE_URL: {os.getenv('SUPABASE_URL', 'NOT SET')}")
+print(f"SUPABASE_SERVICE_ROLE_KEY: {os.getenv('SUPABASE_SERVICE_ROLE_KEY', 'NOT SET')}")
 print("=== END DEBUG ===")
 
 class Config:
@@ -55,6 +57,10 @@ class Config:
     
     # Deepgram Configuration
     DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
+    
+    # Supabase Configuration
+    SUPABASE_URL = os.getenv('SUPABASE_URL')
+    SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
     
     # Redis Configuration
     REDIS_URL = os.getenv('REDIS_URL')
