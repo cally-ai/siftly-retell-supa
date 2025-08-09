@@ -2,7 +2,7 @@
 Webhook service utilities
 """
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 import pytz
 from supabase import create_client
@@ -295,130 +295,6 @@ class WebhookService:
             logger.error(f"Error in _get_customer_data: {e}")
             return None
     
-    
-    def _process_language_linking(self, record_id: str, webhook_data: Dict[str, Any]) -> None:
-        """
-        Process language linking based on collected_dynamic_variables
-        
-        Args:
-            record_id: ID of the saved Airtable record
-            webhook_data: Webhook data containing collected_dynamic_variables
-        """
-        try:
-            # Extract collected_dynamic_variables
-            collected_vars = webhook_data.get('collected_dynamic_variables', {})
-            if not collected_vars:
-                logger.info(f"No collected_dynamic_variables found for record: {record_id}")
-                return
-            
-            # Extract caller_language
-            caller_language = collected_vars.get('caller_language')
-            if not caller_language:
-                logger.info(f"No caller_language found in collected_dynamic_variables for record: {record_id}")
-                return
-            
-            # Search for matching language record in the 'language' table
-            language_records = airtable_service.search_records_in_table('language', 'language_name', caller_language)
-            
-            if not language_records:
-                logger.warning(f"No language record found for '{caller_language}' in language table")
-                return
-            
-            if len(language_records) > 1:
-                logger.warning(f"Multiple language records found for '{caller_language}', using first one")
-            
-            # Get the first matching language record
-            language_record = language_records[0]
-            language_record_id = language_record.get('id')
-            
-            if not language_record_id:
-                logger.error(f"Language record found but no ID available for '{caller_language}'")
-                return
-            
-            # Link the language record to the event record
-            link_success = airtable_service.link_record(record_id, 'language', [language_record_id])
-            
-            if link_success:
-                logger.info(f"Language linked: {caller_language}")
-            else:
-                logger.error(f"Failed to link language record {language_record_id} to event record {record_id}")
-                
-        except Exception as e:
-            logger.error(f"Error processing language linking for record {record_id}: {e}")
-    
-    def get_webhook_statistics(self, hours: int = 24) -> Dict[str, Any]:
-        """
-        Get webhook statistics for the specified time period
-        
-        Args:
-            hours: Number of hours to look back
-        
-        Returns:
-            Statistics dictionary
-        """
-        if not airtable_service.is_configured():
-            return {}
-        
-        try:
-            # Calculate timestamp for filtering
-            from datetime import timedelta
-            cutoff_time = datetime.now() - timedelta(hours=hours)
-            cutoff_iso = cutoff_time.isoformat()
-            
-            # Get records from the last N hours
-            formula = f"IS_AFTER({{Timestamp}}, '{cutoff_iso}')"
-            records = airtable_service.get_records(formula=formula)
-            
-            # Calculate statistics
-            stats = {
-                'total_calls': len(records),
-                'call_types': {},
-                'sentiments': {},
-                'priority_levels': {},
-                'average_duration': 0,
-                'total_cost': 0,
-                'requires_followup': 0
-            }
-            
-            total_duration = 0
-            total_cost = 0
-            
-            for record in records:
-                fields = record.get('fields', {})
-                
-                # Count event types
-                event_type = fields.get('Event Type', 'unknown')
-                stats['call_types'][event_type] = stats['call_types'].get(event_type, 0) + 1
-                
-                # Count sentiments
-                sentiment = fields.get('Sentiment', 'unknown')
-                stats['sentiments'][sentiment] = stats['sentiments'].get(sentiment, 0) + 1
-                
-                # Count priority levels
-                priority = fields.get('Priority Level', 'normal')
-                stats['priority_levels'][priority] = stats['priority_levels'].get(priority, 0) + 1
-                
-                # Sum durations and costs
-                duration = fields.get('Duration', 0)
-                total_duration += duration
-                
-                cost = fields.get('Cost', 0)
-                total_cost += cost
-                
-                # Count follow-ups
-                if fields.get('Requires Followup', False):
-                    stats['requires_followup'] += 1
-            
-            # Calculate averages
-            if stats['total_calls'] > 0:
-                stats['average_duration'] = total_duration / stats['total_calls']
-                stats['total_cost'] = total_cost
-            
-            return stats
-            
-        except Exception as e:
-            logger.error(f"Error getting webhook statistics: {e}")
-            return {}
 
     def _get_caller_language_from_phone_id(self, phone_number_id: str) -> Optional[str]:
         """
