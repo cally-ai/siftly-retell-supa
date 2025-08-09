@@ -62,9 +62,9 @@ def system_status():
             'timestamp': datetime.now().isoformat(),
             'uptime': 'N/A',  # Could be enhanced with actual uptime tracking
             'services': {
-                'airtable': {
-                    'configured': airtable_service.is_configured(),
-                    'status': 'connected' if airtable_service.is_configured() else 'disconnected'
+                'supabase': {
+                    'configured': bool(Config.SUPABASE_URL and Config.SUPABASE_SERVICE_ROLE_KEY),
+                    'status': 'configured' if (Config.SUPABASE_URL and Config.SUPABASE_SERVICE_ROLE_KEY) else 'not_configured'
                 }
             },
             'configuration': {
