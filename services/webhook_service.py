@@ -13,7 +13,7 @@ from utils.logger import get_logger
 from utils.validators import validate_retell_webhook, validate_retell_inbound_webhook, sanitize_webhook_data
 from services.airtable_service import airtable_service
 from services.deepgram_service import get_deepgram_service
-from services.redis_client import redis_client, redis_client_sync, is_redis_configured
+ 
 
 logger = get_logger(__name__)
 
@@ -520,7 +520,7 @@ class WebhookService:
 
     def _get_customer_data(self, to_number: str) -> Optional[Dict[str, Any]]:
         """
-        Get customer data from Airtable based on to_number (sync wrapper with Redis cache)
+        Get customer data from Airtable based on to_number
         
         Args:
             to_number: The phone number to look up
@@ -528,36 +528,13 @@ class WebhookService:
         Returns:
             Customer data dictionary or None if not found
         """
-        # Check Redis cache first if configured
-        if is_redis_configured():
-            try:
-                # Use synchronous Redis client to avoid event loop conflicts
-                cached_data = redis_client_sync.get(to_number)
-                
-                if cached_data:
-                    logger.info(f"Redis cache hit for {to_number}")
-                    return json.loads(cached_data)
-                else:
-                    logger.info(f"Redis cache miss for {to_number}")
-            except Exception as e:
-                logger.warning(f"Redis cache error for {to_number}: {e}")
-        
-        # Fallback to Airtable lookup
+        # Airtable lookup
         logger.info(f"Performing Airtable lookup for {to_number}")
         try:
             # Use ThreadPoolExecutor to run async operations in sync context
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 data = executor.submit(lambda: asyncio.run(self._get_customer_data_async(to_number))).result()
-            
-            # Cache result in Redis if found and Redis is configured
-            if data and is_redis_configured():
-                try:
-                    # Use synchronous Redis client to avoid event loop conflicts
-                    redis_client_sync.set(to_number, json.dumps(data), ex=10800)  # 3 hours TTL
-                    logger.info(f"Cached data for {to_number} in Redis")
-                except Exception as e:
-                    logger.warning(f"Failed to cache data for {to_number}: {e}")
             
             return data
         except Exception as e:

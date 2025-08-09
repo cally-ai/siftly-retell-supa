@@ -46,7 +46,7 @@ class IVRService:
     
     def get_ivr_configuration(self, twilio_number: str) -> dict:
         """
-        Get IVR configuration for a specific Twilio number (with Redis caching)
+        Get IVR configuration for a specific Twilio number
         
         Args:
             twilio_number: The Twilio number that was called
@@ -57,25 +57,7 @@ class IVRService:
         try:
             logger.info(f"Looking up IVR configuration for Twilio number: {twilio_number}")
             
-            # Check Redis cache first if configured
-            from services.redis_client import redis_client_sync, is_redis_configured
-            import json
-            
-            if is_redis_configured():
-                try:
-                    # Use IVR-specific cache key
-                    cache_key = f"ivr_config_{twilio_number}"
-                    cached_data = redis_client_sync.get(cache_key)
-                    
-                    if cached_data:
-                        logger.info(f"Redis cache hit for IVR config: {twilio_number}")
-                        return json.loads(cached_data)
-                    else:
-                        logger.info(f"Redis cache miss for IVR config: {twilio_number}")
-                except Exception as e:
-                    logger.warning(f"Redis cache error for IVR config {twilio_number}: {e}")
-            
-            # Fallback to Supabase lookup
+            # Supabase lookup
             logger.info(f"Performing Supabase lookup for IVR config: {twilio_number}")
             
             # Step 1: Query twilio_number table to get client_ivr_language_id
@@ -154,15 +136,6 @@ class IVRService:
                     logger.error(f"No language configured for single language setup: {twilio_number}")
                     return None
             
-            # Cache result in Redis if found and Redis is configured
-            if config and is_redis_configured():
-                try:
-                    cache_key = f"ivr_config_{twilio_number}"
-                    redis_client_sync.set(cache_key, json.dumps(config), ex=10800)  # 3 hours TTL
-                    logger.info(f"Cached IVR config for {twilio_number} in Redis")
-                except Exception as e:
-                    logger.warning(f"Failed to cache IVR config for {twilio_number}: {e}")
-            
             return config
             
         except Exception as e:
@@ -171,7 +144,7 @@ class IVRService:
     
     def get_transfer_number(self, language_id: str) -> str:
         """
-        Get the transfer number for a specific language (with Redis caching)
+        Get the transfer number for a specific language
         
         Args:
             language_id: The language record ID from language table
@@ -182,25 +155,7 @@ class IVRService:
         try:
             logger.info(f"Getting transfer number for language_id: {language_id}")
             
-            # Check Redis cache first if configured
-            from services.redis_client import redis_client_sync, is_redis_configured
-            import json
-            
-            if is_redis_configured():
-                try:
-                    # Use transfer-specific cache key
-                    cache_key = f"transfer_number_{language_id}"
-                    cached_data = redis_client_sync.get(cache_key)
-                    
-                    if cached_data:
-                        logger.info(f"Redis cache hit for transfer number: {language_id}")
-                        return cached_data
-                    else:
-                        logger.info(f"Redis cache miss for transfer number: {language_id}")
-                except Exception as e:
-                    logger.warning(f"Redis cache error for transfer number {language_id}: {e}")
-            
-            # Fallback to Supabase lookup
+            # Supabase lookup
             logger.info(f"Performing Supabase lookup for transfer number: {language_id}")
             
             # Step 1: Query vapi_workflow table to get the workflow for this language
@@ -225,15 +180,6 @@ class IVRService:
             transfer_number = twilio_number_record.get('twilio_number')
             
             logger.info(f"Found transfer number: {transfer_number} for language_id: {language_id} via vapi_workflow: {vapi_workflow_id}")
-            
-            # Cache result in Redis if found and Redis is configured
-            if transfer_number and is_redis_configured():
-                try:
-                    cache_key = f"transfer_number_{language_id}"
-                    redis_client_sync.set(cache_key, transfer_number, ex=10800)  # 3 hours TTL
-                    logger.info(f"Cached transfer number for {language_id} in Redis")
-                except Exception as e:
-                    logger.warning(f"Failed to cache transfer number for {language_id}: {e}")
             
             return transfer_number
             
