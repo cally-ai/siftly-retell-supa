@@ -10,7 +10,7 @@ import pytz
 from pyairtable import Table
 from config import Config
 from utils.logger import get_logger
-from utils.validators import validate_retell_webhook, validate_retell_inbound_webhook, sanitize_webhook_data
+from utils.logger import get_logger
 from services.airtable_service import airtable_service
 from services.deepgram_service import get_deepgram_service
  
@@ -261,17 +261,8 @@ class WebhookService:
         event_type = data.get('event', 'unknown')
         # Removed verbose call event logging to reduce bloat
         
-        # Validate webhook data
-        is_valid, errors = validate_retell_webhook(data)
-        if not is_valid:
-            logger.error(f"Invalid webhook data: {errors}")
-            raise ValueError(f"Invalid webhook data: {errors}")
-        
-        # Sanitize data
-        sanitized_data = sanitize_webhook_data(data)
-        
-        # Extract and process webhook information
-        webhook_data = self._extract_webhook_data(sanitized_data)
+        # Extract and process webhook information without Retell-specific validation
+        webhook_data = self._extract_webhook_data(data)
         
         # Add processing insights
         processed_data = self._add_insights(webhook_data)
@@ -298,15 +289,7 @@ class WebhookService:
         event_type = data.get('event', 'unknown')
         # Removed verbose inbound webhook logging to reduce bloat
         
-        # Validate inbound webhook data
-        validation_start = time.time()
-        is_valid, errors = validate_retell_inbound_webhook(data)
-        validation_duration = time.time() - validation_start
-        # Removed validation duration logging to reduce bloat
-        
-        if not is_valid:
-            logger.error(f"Invalid inbound webhook data: {errors}")
-            raise ValueError(f"Invalid inbound webhook data: {errors}")
+        # Skipping Retell-specific inbound validation
         
         # Extract inbound call data
         inbound_data = data.get('call_inbound', {})

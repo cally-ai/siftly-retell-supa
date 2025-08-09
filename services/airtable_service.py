@@ -8,7 +8,6 @@ from typing import Dict, Any, List, Optional, Union
 from pyairtable import Api, Base, Table
 from config import Config
 from utils.logger import get_logger
-from utils.validators import validate_airtable_record
 
 logger = get_logger(__name__)
 
@@ -59,11 +58,7 @@ class AirtableService:
             logger.error("Airtable service not configured")
             return None
         
-        # Validate data
-        is_valid, errors = validate_airtable_record(data)
-        if not is_valid:
-            logger.error(f"Invalid record data: {errors}")
-            return None
+        # Skipping Airtable-specific validators (migrating to Supabase)
         
         try:
             record = self.table.create(data)
@@ -92,11 +87,7 @@ class AirtableService:
             # Create a temporary table instance for the specified table
             temp_table = Table(self.api_key, self.base_id, table_name)
             
-            # Validate data
-            is_valid, errors = validate_airtable_record(data)
-            if not is_valid:
-                logger.error(f"Invalid record data: {errors}")
-                return None
+            # Skipping Airtable-specific validators (migrating to Supabase)
             
             logger.info(f"Sending data to Airtable table {table_name}: {data}")
             record = temp_table.create(data)
@@ -170,11 +161,7 @@ class AirtableService:
             logger.error("Airtable service not configured")
             return None
         
-        # Validate data
-        is_valid, errors = validate_airtable_record(data)
-        if not is_valid:
-            logger.error(f"Invalid record data: {errors}")
-            return None
+        # Skipping Airtable-specific validators (migrating to Supabase)
         
         try:
             record = self.table.update(record_id, data)
@@ -362,18 +349,8 @@ class AirtableService:
             logger.warning("No records provided for batch creation")
             return []
         
-        # Validate all records
-        valid_records = []
-        for i, data in enumerate(records_data):
-            is_valid, errors = validate_airtable_record(data)
-            if is_valid:
-                valid_records.append(data)
-            else:
-                logger.warning(f"Skipping invalid record at index {i}: {errors}")
-        
-        if not valid_records:
-            logger.error("No valid records to create")
-            return []
+        # Directly send all records (validation removed during migration)
+        valid_records = records_data or []
         
         try:
             # Airtable allows up to 10 records per batch
