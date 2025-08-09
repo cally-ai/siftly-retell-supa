@@ -361,12 +361,8 @@ class IVRService:
             }
             
             update_response = self.supabase.table('vapi_webhook_event').update(update_data).eq('id', vapi_event_id).execute()
-            
-            if update_response.error:
-                logger.error(f"Failed to update VAPI webhook event {vapi_event_id} with caller_id {caller_id}: {update_response.error}")
-                return False
-                
-            if not update_response.data:
+
+            if not getattr(update_response, 'data', None):
                 logger.error(f"Failed to update VAPI webhook event {vapi_event_id} with caller_id {caller_id}: No data returned")
                 return False
                 
