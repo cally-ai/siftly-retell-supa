@@ -4,10 +4,10 @@ Webhook service utilities
 import asyncio
 from typing import Dict, Any, Optional
 from datetime import datetime
-from pyairtable import Table
+import pytz
+from supabase import create_client
 from config import Config
 from utils.logger import get_logger
-from services.airtable_service import airtable_service
 
 logger = get_logger(__name__)
 
@@ -16,6 +16,21 @@ class WebhookService:
     
     def __init__(self):
         """Initialize webhook service"""
+        self._supabase_client = None
+
+    @property
+    def supabase(self):
+        """Lazy-init Supabase client"""
+        if self._supabase_client is None:
+            try:
+                self._supabase_client = create_client(
+                    Config.SUPABASE_URL,
+                    Config.SUPABASE_SERVICE_ROLE_KEY
+                )
+            except Exception as e:
+                logger.error(f"Could not initialize Supabase client: {e}")
+                raise
+        return self._supabase_client
 
     def process_business_hours_check(self, data: Dict[str, Any]) -> Dict[str, str]:
         """
@@ -47,7 +62,7 @@ class WebhookService:
             current_utc_time = datetime.utcnow()
             logger.info(f"Current UTC time: {current_utc_time}")
             
-            # Step 3: Look up the client in Airtable
+            # Step 3: Look up the client in Supabase
             client_data = self._get_client_business_hours(client_id)
             if not client_data:
                 logger.warning(f"Client not found or no business hours configured for client_id: {client_id}")
@@ -108,61 +123,43 @@ class WebhookService:
 
     def _get_client_business_hours(self, client_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get client's business hours configuration from Airtable
+        Get client's business hours configuration from Supabase
         
         Args:
-            client_id: The client's Airtable record ID
+            client_id: The client's record ID
         
         Returns:
-            Client data with timezone and opening hours, or None if not found
+            Dict with 'timezone' and 'opening_hours' list, or None
         """
-        if not airtable_service.is_configured():
-            logger.error("Airtable service not configured")
-            return None
-        
         try:
-            # Get client record
-            client_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblkyQzhGKVv6H03U')
-            client_record = client_table.get(client_id)
-            
-            if not client_record:
-                logger.warning(f"Client record not found: {client_id}")
+            # 1) Get client's timezone_id
+            client_resp = self.supabase.table('client').select('timezone_id').eq('id', client_id).limit(1).execute()
+            if not client_resp.data:
+                logger.warning(f"Client not found: {client_id}")
                 return None
-            
-            client_fields = client_record['fields']
-            timezone = client_fields.get('timezone_text')  # Use the formula field instead of linked field
-            opening_hours_ids = client_fields.get('opening_hours', [])
-            
-            if not timezone:
+            timezone_id = client_resp.data[0].get('timezone_id')
+            timezone_name = None
+            if timezone_id:
+                tz_resp = self.supabase.table('timezone').select('name').eq('id', timezone_id).limit(1).execute()
+                if tz_resp.data:
+                    timezone_name = tz_resp.data[0].get('name')
+            if not timezone_name:
                 logger.warning(f"No timezone configured for client: {client_id}")
                 return None
             
-            if not opening_hours_ids:
+            # 2) Fetch opening hours for this client
+            oh_resp = self.supabase.table('opening_hours').select('day, start_time, end_time').eq('client_id', client_id).execute()
+            opening_hours_records = oh_resp.data or []
+            if not opening_hours_records:
                 logger.warning(f"No opening hours configured for client: {client_id}")
                 return None
             
-            # Get opening hours records
-            opening_hours_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblHNQIWJn1QzEj6r')
-            opening_hours_records = []
-            
-            for hours_id in opening_hours_ids:
-                try:
-                    hours_record = opening_hours_table.get(hours_id)
-                    if hours_record:
-                        fields = hours_record['fields']
-                        logger.info(f"Opening hours record {hours_id}: {fields}")
-                        opening_hours_records.append(fields)
-                except Exception as e:
-                    logger.warning(f"Error getting opening hours record {hours_id}: {e}")
-                    continue
-            
             return {
-                'timezone': timezone,
+                'timezone': timezone_name,
                 'opening_hours': opening_hours_records
             }
-            
         except Exception as e:
-            logger.error(f"Error getting client business hours: {e}")
+            logger.error(f"Error getting client business hours from Supabase: {e}")
             return None
 
     def _check_business_hours(self, opening_hours: List[Dict[str, Any]], current_weekday: str, current_time_str: str) -> bool:
@@ -221,12 +218,7 @@ class WebhookService:
             logger.error(f"Error checking business hours: {e}")
             return False
 
-    # Removed Retell webhook processing (not used)
-    
-    # Removed Retell inbound webhook processing (not used)
-    
-    # Removed Retell inbound configuration builder (not used)
-    
+  
     async def _get_customer_data_async(self, to_number: str) -> Optional[Dict[str, Any]]:
         """
         Get customer data from Airtable based on to_number (async version)
@@ -238,108 +230,42 @@ class WebhookService:
             Customer data dictionary or None if not found
         """
 
-        logger.info(f"=== AIRTABLE LOOKUP START (async) ===")
+        logger.info(f"=== SUPABASE LOOKUP START (async) ===")
         
         try:
-            # Step 1: Find the to_number in TABLE_ID_TWILIO_NUMBER
-            twilio_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tbl0PeZoX2qgl74ZT')
-            logger.info(f"Searching Twilio table for number: {to_number}")
-            twilio_records = await asyncio.to_thread(
-                twilio_table.all, formula=f"{{twilio_number}} = '{to_number}'"
-            )
-            
-            logger.info(f"Found {len(twilio_records)} Twilio records")
-            
-            if not twilio_records:
-                logger.warning(f"No Twilio number found for: {to_number}")
+            # Step 1: Find client via twilio_number
+            tw_resp = self.supabase.table('twilio_number').select('client_id').eq('twilio_number', to_number).limit(1).execute()
+            if not tw_resp.data:
+                logger.warning(f"No twilio_number record found for: {to_number}")
                 return None
-            
-            # Get the client record ID from the first match
-            twilio_record = twilio_records[0]
-            client_record_id = twilio_record['fields'].get('client', [None])[0] if twilio_record['fields'].get('client') else None
-            
-            if not client_record_id:
-                logger.warning(f"No client linked to Twilio number: {to_number}")
+            client_id = tw_resp.data[0].get('client_id')
+            if not client_id:
+                logger.warning(f"twilio_number {to_number} has no client_id")
                 return None
-            
-            # Step 2-4: Run client + dynamic vars + language lookups in parallel
-            client_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblkyQzhGKVv6H03U')
-            dynamic_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblGIPAQZ2rgn6naD')
-            
-            # Get client record first to extract metadata
-            client_record = await asyncio.to_thread(client_table.get, client_record_id)
-            
-            if not client_record:
-                logger.warning(f"Client record not found: {client_record_id}")
-                return None
-            
-            client_fields = client_record['fields']
-            
-            # Extract IDs for parallel lookups
-            dynamic_variables_record_id = client_fields.get('dynamic_variables', [None])[0] if client_fields.get('dynamic_variables') else None
-            language_agent_names = client_fields.get('language_agent_names', [])
-            
-            if not dynamic_variables_record_id:
-                logger.warning(f"No dynamic variables ID found for client: {client_record_id}")
-                return None
-            
-            # Prepare parallel tasks
-            tasks = []
-            
-            # Task 1: Get dynamic variables
-            dynamic_record_task = asyncio.to_thread(dynamic_table.get, dynamic_variables_record_id)
-            tasks.append(dynamic_record_task)
-            
-            # Task 2+: Get language agent names
-            language_tasks = []
-            if language_agent_names:
-                language_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblT79Xju3vLxNipr')
-                for linked_record_id in language_agent_names:
-                    language_tasks.append(asyncio.to_thread(language_table.get, linked_record_id))
-                tasks.extend(language_tasks)
-            
-            # Execute all lookups in parallel
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results
-            dynamic_record = results[0]
-            language_records = results[1:] if len(results) > 1 else []
-            
-            # Check for exceptions
-            if isinstance(dynamic_record, Exception):
-                logger.error(f"Error getting dynamic record: {dynamic_record}")
-                return None
-            
-            # Build dynamic variables dictionary
-            dynamic_variables = {}
-            
-            # Add dynamic variables
-            if dynamic_record:
-                dynamic_fields = dynamic_record['fields']
-                excluded_fields = ['name', 'client_dynamic_variables_id', 'client']
-                for field_name, field_value in dynamic_fields.items():
-                    if field_name not in excluded_fields:
-                        dynamic_variables[field_name] = field_value
-            
-            # Add language agent mappings
-            for i, lang_rec in enumerate(language_records):
-                if isinstance(lang_rec, Exception):
-                    logger.warning(f"Error getting language record {language_agent_names[i]}: {lang_rec}")
-                    continue
-                if lang_rec:
-                    key_pair_value = lang_rec['fields'].get('key_pair', '')
-                    if key_pair_value and '=' in key_pair_value:
-                        parts = key_pair_value.split('=', 1)
-                        if len(parts) == 2:
-                            key = parts[0].strip()
-                            value = parts[1].strip()
+
+            # Step 2: Fetch client_dynamic_variables
+            dynamic_variables: Dict[str, Any] = {}
+            cdv_resp = self.supabase.table('client_dynamic_variables').select('*').eq('client_id', client_id).limit(1).execute()
+            if cdv_resp.data:
+                cdv = cdv_resp.data[0]
+                for k, v in cdv.items():
+                    if k not in ('id', 'client_id') and v is not None:
+                        dynamic_variables[k] = v
+
+            # Step 3: Fetch client_language_agent_name key pairs
+            clan_resp = self.supabase.table('client_language_agent_name').select('key_pair').eq('client_id', client_id).execute()
+            for rec in clan_resp.data or []:
+                key_pair_value = rec.get('key_pair') or ''
+                if isinstance(key_pair_value, str) and '=' in key_pair_value:
+                    parts = key_pair_value.split('=', 1)
+                    if len(parts) == 2:
+                        key = parts[0].strip()
+                        value = parts[1].strip()
+                        if key:
                             dynamic_variables[key] = value
 
-            
-
-            logger.info(f"Returning dynamic variables: {dynamic_variables}")
-            logger.info(f"=== AIRTABLE LOOKUP END (async) ===")
-            
+            logger.info(f"Returning dynamic variables from Supabase: {list(dynamic_variables.keys())}")
+            logger.info(f"=== SUPABASE LOOKUP END (async) ===")
             return dynamic_variables
             
         except Exception as e:
@@ -356,8 +282,8 @@ class WebhookService:
         Returns:
             Customer data dictionary or None if not found
         """
-        # Airtable lookup
-        logger.info(f"Performing Airtable lookup for {to_number}")
+        # Supabase lookup
+        logger.info(f"Performing Supabase lookup for {to_number}")
         try:
             # Use ThreadPoolExecutor to run async operations in sync context
             import concurrent.futures
@@ -369,19 +295,6 @@ class WebhookService:
             logger.error(f"Error in _get_customer_data: {e}")
             return None
     
-    # Removed Retell webhook extraction (not used)
-    
-    # Removed Retell transcript summarization (not used)
-    
-    # Removed Retell insights (not used)
-    
-    # Removed Retell sentiment scoring (not used)
-    
-    # Removed Retell Airtable save (not used)
-    
-    # Removed Retell event processing (not used)
-    
-    # Removed Retell event handlers (not used)
     
     def _process_language_linking(self, record_id: str, webhook_data: Dict[str, Any]) -> None:
         """
@@ -519,40 +432,25 @@ class WebhookService:
         """
         try:
             logger.info(f"Looking up caller language for phone_number_id: {phone_number_id}")
-            
-            # Search in twilio_number table for matching vapi_phone_number_id
-            twilio_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tbl0PeZoX2qgl74ZT')
-            
-            # Search for record with matching vapi_phone_number_id
-            twilio_records = twilio_table.all(formula=f"{{vapi_phone_number_id}} = '{phone_number_id}'")
-            
-            if not twilio_records:
-                logger.warning(f"No twilio_number record found for phone_number_id: {phone_number_id}")
+            # Find twilio_number row by vapi_phone_number_id
+            tn_resp = self.supabase.table('twilio_number').select('language_id').eq('vapi_phone_number_id', phone_number_id).limit(1).execute()
+            if not tn_resp.data:
+                logger.warning(f"No twilio_number found for phone_number_id: {phone_number_id}")
                 return None
-            
-            twilio_record = twilio_records[0]
-            language_linked_ids = twilio_record['fields'].get('language', [])
-            
-            if not language_linked_ids:
-                logger.warning(f"No language linked to twilio_number record for phone_number_id: {phone_number_id}")
+            language_id = tn_resp.data[0].get('language_id')
+            if not language_id:
+                logger.warning(f"No language_id set for phone_number_id: {phone_number_id}")
                 return None
-            
-            # Get the language record to extract vapi_language_code
-            language_table = Table(Config.AIRTABLE_API_KEY, Config.AIRTABLE_BASE_ID, 'tblT79Xju3vLxNipr')
-            language_record = language_table.get(language_linked_ids[0])
-            
-            if not language_record:
-                logger.warning(f"Language record not found for ID: {language_linked_ids[0]}")
+            lang_resp = self.supabase.table('language').select('vapi_language_code').eq('id', language_id).limit(1).execute()
+            if not lang_resp.data:
+                logger.warning(f"Language not found for id: {language_id}")
                 return None
-            
-            vapi_language_code = language_record['fields'].get('vapi_language_code')
-            
+            vapi_language_code = lang_resp.data[0].get('vapi_language_code')
             if vapi_language_code:
                 logger.info(f"Found caller language: {vapi_language_code} for phone_number_id: {phone_number_id}")
                 return vapi_language_code
-            else:
-                logger.warning(f"No vapi_language_code found in language record for phone_number_id: {phone_number_id}")
-                return None
+            logger.warning(f"No vapi_language_code found for language id: {language_id}")
+            return None
                 
         except Exception as e:
             logger.error(f"Error getting caller language for phone_number_id {phone_number_id}: {e}")
