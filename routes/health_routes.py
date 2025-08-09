@@ -4,8 +4,8 @@ Health and system route handlers
 from flask import Blueprint, jsonify
 from datetime import datetime
 from utils.logger import get_logger
-from services.airtable_service import airtable_service
 from config import Config
+from supabase import create_client
 
 logger = get_logger(__name__)
 
@@ -16,29 +16,29 @@ health_bp = Blueprint('health', __name__)
 def health_check():
     """Health check endpoint for Render"""
     try:
-        # Check Airtable connection
-        airtable_status = 'connected' if airtable_service.is_configured() else 'disconnected'
-        
-        # Get basic system info
+        # Check Supabase connection
+        supabase_configured = bool(Config.SUPABASE_URL and Config.SUPABASE_SERVICE_ROLE_KEY)
+
         system_info = {
             'status': 'healthy',
             'timestamp': datetime.now().isoformat(),
-            'airtable_configured': airtable_service.is_configured(),
-            'airtable_status': airtable_status,
+            'supabase_configured': supabase_configured,
+            'supabase_status': 'connected' if supabase_configured else 'disconnected',
             'environment': Config.FLASK_ENV,
             'debug_mode': Config.DEBUG
         }
-        
-        # Test Airtable connection if configured
-        if airtable_service.is_configured():
+
+        # Test Supabase connection if configured
+        if supabase_configured:
             try:
-                # Try to get one record to test connection
-                test_records = airtable_service.get_records(max_records=1)
-                system_info['airtable_test'] = 'success'
-                system_info['airtable_records_count'] = len(test_records)
+                client = create_client(Config.SUPABASE_URL, Config.SUPABASE_SERVICE_ROLE_KEY)
+                # Light test query: fetch 1 row from a small table
+                resp = client.table('language').select('id').limit(1).execute()
+                system_info['supabase_test'] = 'success'
+                system_info['supabase_rows'] = len(resp.data or [])
             except Exception as e:
-                system_info['airtable_test'] = 'failed'
-                system_info['airtable_error'] = str(e)
+                system_info['supabase_test'] = 'failed'
+                system_info['supabase_error'] = str(e)
                 system_info['status'] = 'degraded'
         
         return jsonify(system_info), 200
