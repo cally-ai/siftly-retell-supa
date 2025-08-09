@@ -989,11 +989,10 @@ def status_callback():
                             }
                             
                             response = service.supabase.table("twilio_call").update(update_data).eq("id", matching_vapi_record['id']).execute()
-                            
-                            if response.error:
-                                logger.error(f"Failed to update vapi_webhook_event_id in twilio_call: {response.error}")
-                            else:
+                            if getattr(response, 'data', None):
                                 logger.info(f"Branch 1: Successfully updated VAPI record {matching_vapi_record['id']} with vapi_webhook_event_id")
+                            else:
+                                logger.warning(f"Update twilio_call {matching_vapi_record['id']} with vapi_webhook_event_id returned no data")
                         else:
                             logger.warning("ivr_vapi_webhook_event is empty or invalid; skipping Supabase update")
                         
@@ -1004,10 +1003,7 @@ def status_callback():
                         record_id = ivr_vapi_webhook_event[0]  # Take the first linked record
                         response = service.supabase.table("vapi_webhook_event").select("*").eq("id", record_id).limit(1).execute()
                         
-                        if response.error:
-                            logger.error(f"Supabase error while retrieving vapi_webhook_event {record_id}: {response.error.message}")
-                            vapi_event_record = None
-                        elif response.data:
+                        if getattr(response, 'data', None):
                             vapi_event_record = response.data[0]
                         else:
                             vapi_event_record = None
