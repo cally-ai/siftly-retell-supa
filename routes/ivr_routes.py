@@ -1074,11 +1074,11 @@ def status_callback():
                                         
                                         # Update the vapi_webhook_event record with VAPI data
                                         record_id = ivr_vapi_webhook_event[0]
-                            response = service.supabase.table("vapi_webhook_event").update(mapped_vapi_data).eq("id", record_id).execute()
-                            if getattr(response, 'data', None):
-                                logger.info(f"Branch 1: Successfully updated vapi_webhook_event record with VAPI data")
-                            else:
-                                logger.warning(f"Update vapi_webhook_event {record_id} returned no data")
+                                        response = service.supabase.table("vapi_webhook_event").update(mapped_vapi_data).eq("id", record_id).execute()
+                                        if getattr(response, 'data', None):
+                                            logger.info(f"Branch 1: Successfully updated vapi_webhook_event record with VAPI data")
+                                        else:
+                                            logger.warning(f"Update vapi_webhook_event {record_id} returned no data")
                                     else:
                                         logger.warning(f"Branch 1: No VAPI data to update")
                                 else:
