@@ -1,15 +1,12 @@
-# Siftly - Retell AI Webhook Handler
+# Siftly - Webhook & IVR Service
 
-A Python Flask application that receives HTTP requests from Retell AI and manages data in Airtable.
+A Python Flask application that handles IVR flows, VAPI webhooks, and stores data in Supabase.
 
 ## Features
 
-- **Retell AI Webhook Handler**: Receives and processes webhooks from Retell AI
-- **Airtable Integration**: Automatically saves webhook data to Airtable
-- **RESTful API**: Full CRUD operations for Airtable records
+- **IVR and VAPI handlers**: Endpoints for IVR and VAPI integrations
+- **Supabase-backed storage**: Reads/writes operational data to Supabase
 - **Modular Architecture**: Clean separation of concerns with services, routes, and utilities
-- **Advanced Analytics**: Webhook statistics and insights processing
-- **Comprehensive Validation**: Data validation and sanitization
 - **Deployment Ready**: Configured for easy deployment on Render
 
 ## Setup
@@ -17,8 +14,6 @@ A Python Flask application that receives HTTP requests from Retell AI and manage
 ### Prerequisites
 
 - Python 3.8+
-- Airtable account with API access
-- Retell AI account
 
 ### Local Development
 
@@ -39,9 +34,8 @@ A Python Flask application that receives HTTP requests from Retell AI and manage
    ```
    
    Edit `.env` with your actual values:
-   - `AIRTABLE_API_KEY`: Your Airtable API key
-   - `AIRTABLE_BASE_ID`: Your Airtable base ID
-   - `AIRTABLE_TABLE_NAME`: Your Airtable table name (default: Main)
+   - `SUPABASE_URL`: Your Supabase project URL
+   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key
 
 4. **Run the application**
    ```bash
@@ -50,24 +44,9 @@ A Python Flask application that receives HTTP requests from Retell AI and manage
 
 The application will be available at `http://localhost:5000`
 
-### Airtable Setup
+### Supabase Setup
 
-1. Create a new base in Airtable
-2. Create a table with the following fields (or modify the code to match your schema):
-   - `Timestamp` (Date/Time)
-   - `Event Type` (Single line text)
-   - `Call ID` (Single line text)
-   - `Agent ID` (Single line text)
-   - `Customer ID` (Single line text)
-   - `Status` (Single line text)
-   - `Transcript` (Long text)
-   - `Summary` (Long text)
-   - `Sentiment` (Single line text)
-   - `Duration` (Number)
-   - `Cost` (Number)
-   - `Raw Data` (Long text)
-
-3. Get your API key and base ID from Airtable settings
+Provide `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in your environment. Ensure your database schema matches the application’s expected tables (e.g., `client`, `twilio_number`, `client_dynamic_variables`, `language`, `caller`, `client_caller`, `twilio_call`, `vapi_webhook_event`, `vapi_workflow`, `opening_hours`, `timezone`, `client_ivr_language_configuration`, `client_ivr_language_configuration_language`, `client_language_agent_name`).
 
 ## Deployment on Render
 
@@ -77,9 +56,8 @@ The application will be available at `http://localhost:5000`
 2. Connect your GitHub repository to Render
 3. Render will automatically detect the `render.yaml` file and configure the service
 4. Add your environment variables in the Render dashboard:
-   - `AIRTABLE_API_KEY`
-   - `AIRTABLE_BASE_ID`
-   - `AIRTABLE_TABLE_NAME` (optional, defaults to "Main")
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
 
 ### Option 2: Manual Setup
 
@@ -97,19 +75,7 @@ The application will be available at `http://localhost:5000`
 ```
 GET /health
 ```
-Returns the health status of the application and Airtable configuration.
-
-### Retell AI Webhook
-```
-POST /webhook/retell
-```
-Receives webhooks from Retell AI and processes them.
-
-### Webhook Statistics
-```
-GET /webhook/statistics?hours=24
-```
-Get webhook statistics for the specified time period (default: 24 hours).
+Returns the health status of the application and Supabase configuration.
 
 ### System Status
 ```
@@ -117,133 +83,17 @@ GET /status
 ```
 Get detailed system status and configuration information.
 
-### Health Check
-```
-GET /health
-```
-Returns the health status of the application and Airtable configuration.
-
 ### Ping
 ```
 GET /ping
 ```
 Simple ping endpoint for load balancers.
 
-**Expected Payload:**
-```json
-{
-  "event_type": "call_ended",
-  "call_id": "call_123",
-  "agent_id": "agent_456",
-  "customer_id": "customer_789",
-  "status": "completed",
-  "transcript": "Hello, how can I help you?",
-  "summary": "Customer inquired about product features",
-  "sentiment": "positive",
-  "duration": 120,
-  "cost": 0.50
-}
-```
-
-### Airtable Operations
-
-#### Get All Records
-```
-GET /airtable/records
-```
-
-#### Create Record
-```
-POST /airtable/records
-Content-Type: application/json
-
-{
-  "Field Name": "Field Value",
-  "Another Field": "Another Value"
-}
-```
-
-#### Update Record
-```
-PUT /airtable/records/{record_id}
-Content-Type: application/json
-
-{
-  "Field Name": "Updated Value"
-}
-```
-
-#### Delete Record
-```
-DELETE /airtable/records/{record_id}
-```
-
-#### Search Records
-```
-GET /airtable/records/search?field=Call ID&value=call_123
-```
-Search records by field value.
-
-#### Get Specific Record
-```
-GET /airtable/records/{record_id}
-```
-Get a specific record by ID.
-
-#### Batch Create Records
-```
-POST /airtable/records/batch
-Content-Type: application/json
-
-[
-  {"Field Name": "Value 1"},
-  {"Field Name": "Value 2"}
-]
-```
-Create multiple records in batch.
-
-## Retell AI Configuration
-
-1. In your Retell AI dashboard, configure webhooks
-2. Set the webhook URL to: `https://your-app-name.onrender.com/webhook/retell`
-3. Configure the events you want to receive (e.g., call_ended, call_started)
-
 ## Customization
 
-### Modifying Webhook Processing
+### Modifying Schema
 
-Edit the `services/webhook_service.py` file to add your custom business logic:
-
-```python
-def _add_insights(self, webhook_data):
-    # Add your custom processing logic here
-    insights = {
-        'call_processed': True,
-        'processing_timestamp': datetime.now().isoformat(),
-        'keywords_found': [],
-        'priority_level': 'normal',
-        'requires_followup': False
-    }
-    
-    # Example: Custom keyword detection
-    if webhook_data.get('transcript'):
-        transcript = webhook_data['transcript'].lower()
-        # Add your keyword detection logic
-    
-    return insights
-```
-
-### Modifying Airtable Schema
-
-Update the field mappings in `services/webhook_service.py` to match your Airtable schema:
-
-```python
-airtable_record = {
-    'Your Timestamp Field': webhook_data['timestamp'],
-    'Your Event Type Field': webhook_data['event_type'],
-    # ... other fields
-}
-```
+Update the Supabase queries in `services/webhook_service.py`, `routes/ivr_routes.py`, and `routes/vapi_routes.py` if your schema changes.
 
 ### Adding New Services
 
@@ -292,9 +142,8 @@ app.register_blueprint(new_bp)
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `AIRTABLE_API_KEY` | Your Airtable API key | Yes |
-| `AIRTABLE_BASE_ID` | Your Airtable base ID | Yes |
-| `AIRTABLE_TABLE_NAME` | Your Airtable table name | No (defaults to "Main") |
+| `SUPABASE_URL` | Supabase project URL | Yes |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Yes |
 | `FLASK_ENV` | Flask environment | No (defaults to production) |
 | `FLASK_DEBUG` | Enable debug mode | No (defaults to False) |
 | `LOG_LEVEL` | Logging level | No (defaults to INFO) |
@@ -305,13 +154,12 @@ app.register_blueprint(new_bp)
 
 ### Common Issues
 
-1. **Airtable connection fails**
-   - Verify your API key and base ID are correct
-   - Check that your Airtable table exists and has the correct field names
+1. **Supabase connection fails**
+   - Verify your URL and service role key are correct
+   - Ensure the referenced tables exist and have expected columns
 
 2. **Webhook not receiving data**
-   - Ensure the webhook URL is correct in Retell AI
-   - Check that the webhook endpoint is publicly accessible
+   - Ensure the webhook endpoint is publicly accessible
    - Verify the request format matches the expected JSON structure
 
 3. **Deployment issues on Render**
@@ -321,7 +169,7 @@ app.register_blueprint(new_bp)
 
 ### Logs
 
-The application logs all webhook requests and Airtable operations. Check the logs in your Render dashboard for debugging information.
+The application logs webhook and IVR operations. Check the logs in your Render dashboard for debugging information.
 
 ## Contributing
 

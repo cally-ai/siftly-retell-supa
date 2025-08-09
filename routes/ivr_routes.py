@@ -479,7 +479,7 @@ def ivr_handler():
             # Check if we have an audio URL for the IVR menu
             if ivr_config.get('audio_url_ivr'):
                 logger.info(f"Using audio URL for IVR menu: {ivr_config['audio_url_ivr']}")
-                # Use the audio URL directly (no need to extract from Airtable file structure)
+                # Use the audio URL directly
                 audio_url = ivr_config['audio_url_ivr']
                 
                 if audio_url:
@@ -647,7 +647,7 @@ def handle_selection():
         # Play the reply message if configured
         if selected_option.get('audio_reply'):
             logger.info(f"Playing audio reply URL: {selected_option['audio_reply']}")
-            # Use the audio URL directly (no need to extract from Airtable file structure)
+            # Use the audio URL directly
             audio_reply_url = selected_option['audio_reply']
             
             if audio_reply_url:

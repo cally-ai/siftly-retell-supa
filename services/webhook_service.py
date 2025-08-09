@@ -167,7 +167,7 @@ class WebhookService:
         Check if current time is within business hours
         
         Args:
-            opening_hours: List of opening hours records from Airtable
+            opening_hours: List of opening hours records from Supabase
             current_weekday: Current weekday in lowercase (e.g., 'monday')
             current_time_str: Current time in HH:MM format (e.g., '14:30')
         
@@ -221,7 +221,7 @@ class WebhookService:
   
     async def _get_customer_data_async(self, to_number: str) -> Optional[Dict[str, Any]]:
         """
-        Get customer data from Airtable based on to_number (async version)
+        Get customer data based on to_number (async version) from Supabase
         
         Args:
             to_number: The phone number to look up
@@ -274,7 +274,7 @@ class WebhookService:
 
     def _get_customer_data(self, to_number: str) -> Optional[Dict[str, Any]]:
         """
-        Get customer data from Airtable based on to_number
+        Get customer data based on to_number from Supabase
         
         Args:
             to_number: The phone number to look up

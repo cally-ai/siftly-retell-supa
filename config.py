@@ -10,12 +10,6 @@ load_dotenv()
 # Debug: Print all environment variables
 import os
 print("=== ENVIRONMENT VARIABLES DEBUG ===")
-print(f"AIRTABLE_API_KEY: {os.getenv('AIRTABLE_API_KEY', 'NOT SET')}")
-print(f"AIRTABLE_BASE_ID: {os.getenv('AIRTABLE_BASE_ID', 'NOT SET')}")
-print(f"AIRTABLE_TABLE_NAME: {os.getenv('AIRTABLE_TABLE_NAME', 'NOT SET')}")
-print(f"TABLE_ID_VAPI_WORKFLOW: {os.getenv('TABLE_ID_VAPI_WORKFLOW', 'NOT SET')}")
-print(f"TABLE_ID_VAPI_WEBHOOK_EVENT: {os.getenv('TABLE_ID_VAPI_WEBHOOK_EVENT', 'NOT SET')}")
-print(f"TABLE_ID_TWILIO_CALL: {os.getenv('TABLE_ID_TWILIO_CALL', 'NOT SET')}")
 print(f"VAPI_API_KEY: {os.getenv('VAPI_API_KEY', 'NOT SET')}")
 print(f"TWILIO_ACCOUNT_SID: {os.getenv('TWILIO_ACCOUNT_SID', 'NOT SET')}")
 print(f"TWILIO_AUTH_TOKEN: {os.getenv('TWILIO_AUTH_TOKEN', 'NOT SET')}")
@@ -33,13 +27,7 @@ class Config:
     FLASK_ENV = os.getenv('FLASK_ENV', 'production')
     DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     
-    # Airtable Configuration
-    AIRTABLE_API_KEY = os.getenv('AIRTABLE_API_KEY')
-    AIRTABLE_BASE_ID = os.getenv('AIRTABLE_BASE_ID')
-    AIRTABLE_TABLE_NAME = os.getenv('AIRTABLE_TABLE_NAME')
-    TABLE_ID_VAPI_WORKFLOW = os.getenv('TABLE_ID_VAPI_WORKFLOW')
-    TABLE_ID_VAPI_WEBHOOK_EVENT = os.getenv('TABLE_ID_VAPI_WEBHOOK_EVENT')
-    TABLE_ID_TWILIO_CALL = os.getenv('TABLE_ID_TWILIO_CALL')
+    # Airtable removed
     
     # Retell AI Configuration
     RETELL_WEBHOOK_SECRET = os.getenv('RETELL_WEBHOOK_SECRET')
@@ -76,17 +64,10 @@ class Config:
         """Validate that required configuration is present"""
         missing_vars = []
         
-        if not cls.AIRTABLE_API_KEY:
-            missing_vars.append('AIRTABLE_API_KEY')
-        if not cls.AIRTABLE_BASE_ID:
-            missing_vars.append('AIRTABLE_BASE_ID')
-        if not cls.AIRTABLE_TABLE_NAME:
-            missing_vars.append('AIRTABLE_TABLE_NAME')
+        # No Airtable required vars
         
         # Debug logging - use print for now since logger might not be set up yet
-        print(f"Config validation - AIRTABLE_API_KEY: {'SET' if cls.AIRTABLE_API_KEY else 'NOT SET'}")
-        print(f"Config validation - AIRTABLE_BASE_ID: {'SET' if cls.AIRTABLE_BASE_ID else 'NOT SET'}")
-        print(f"Config validation - AIRTABLE_TABLE_NAME: {cls.AIRTABLE_TABLE_NAME}")
+        # Airtable validation removed
         print(f"Config validation - OPENAI_API_KEY: {'SET' if cls.OPENAI_API_KEY else 'NOT SET'}")
         print(f"Config validation - DEEPGRAM_API_KEY: {'SET' if cls.DEEPGRAM_API_KEY else 'NOT SET'}")
             
