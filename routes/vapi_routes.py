@@ -65,9 +65,7 @@ class VAPIWebhookService:
                 return None
             
             # Validate response structure
-            if resp.error:
-                logger.error(f"Supabase error: {resp.error}")
-                return None
+            # New client returns data without an error attribute
             
             # Extract vapi_language_code from the joined response
             language_data = resp.data[0].get('language', {})
@@ -166,10 +164,6 @@ class VAPIWebhookService:
                 .limit(1)\
                 .execute()
             
-            if resp.error:
-                logger.error(f"Supabase error: {resp.error}")
-                return None
-            
             if resp.data:
                 return resp.data[0]
             else:
@@ -196,10 +190,6 @@ class VAPIWebhookService:
                 .eq('workflow_id', workflow_id)\
                 .limit(1)\
                 .execute()
-            
-            if resp.error:
-                logger.error(f"Supabase error: {resp.error}")
-                return None
             
             if resp.data:
                 return resp.data[0]
