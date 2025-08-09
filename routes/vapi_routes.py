@@ -419,6 +419,11 @@ def vapi_new_incoming_call_event():
                 'analysis_summary': call_data.get('analysis_summary', ''),
                 'analysis_success_evaluation': call_data.get('analysis_success_evaluation', '')
             }
+
+            # Normalize timestamp fields: use None instead of empty strings
+            for ts_key in ('started_at', 'ended_at'):
+                if not payload.get(ts_key):
+                    payload[ts_key] = None
             
             # Add caller_id if we can find the caller
             if from_number:
