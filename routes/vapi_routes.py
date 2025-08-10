@@ -684,7 +684,19 @@ def start_transfer():
             
             logger.info(f"Initiated agent call {agent_call.sid} to {client_transfer_number}")
             
-            # Store transfer context
+            # Store transfer context in database
+            from datetime import datetime, timedelta, timezone
+            
+            deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_secs)
+            
+            vapi_service.supabase.table('twilio_call').update({
+                'conference_name': conf_name,
+                'agent_call_sid': agent_call.sid,
+                'transfer_timeout_at': deadline.isoformat(),
+                'transfer_started_at': datetime.now(timezone.utc).isoformat(),  # optional
+            }).eq('call_sid', call_sid).execute()
+            
+            # Keep TRANSFER_CTX for fast lookup (nice to have), but DB is the source of truth
             TRANSFER_CTX[conf_name] = {
                 "caller_call_sid": call_sid,
                 "agent_call_sid": agent_call.sid,
@@ -712,9 +724,17 @@ def start_transfer():
                         .update({'conference_status': 'timeout_failed'})\
                         .eq('call_sid', call_sid).execute()
 
-                    # end agent if known
+                    # end agent if known (use DB as source of truth)
+                    agent_sid = None
                     ctx = TRANSFER_CTX.get(conf_name, {})
                     agent_sid = ctx.get("agent_call_sid")
+                    
+                    # Fallback to DB if not in memory
+                    if not agent_sid:
+                        row = vapi_service.supabase.table('twilio_call')\
+                            .select('agent_call_sid').eq('call_sid', call_sid).limit(1).execute()
+                        agent_sid = (row.data or [{}])[0].get('agent_call_sid')
+                    
                     if agent_sid:
                         try:
                             client_th.calls(agent_sid).update(status='completed')
@@ -784,6 +804,13 @@ def conference_update():
         ctx = TRANSFER_CTX.get(friendly_name, {})
         agent_call_sid = ctx.get("agent_call_sid")
         caller_call_sid = ctx.get("caller_call_sid", orig_call_sid)
+        
+        # Read from DB if memory is empty (cross-instance reliability)
+        if not agent_call_sid:
+            row = vapi_service.supabase.table('twilio_call')\
+                .select('agent_call_sid').eq('call_sid', orig_call_sid).limit(1).execute()
+            agent_call_sid = (row.data or [{}])[0].get('agent_call_sid')
+            logger.info(f"Retrieved agent_call_sid {agent_call_sid} from DB for call_sid {orig_call_sid}")
         
         # Save ConferenceSid whenever present
         if conference_sid:
