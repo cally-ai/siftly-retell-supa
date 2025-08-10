@@ -205,6 +205,9 @@ class VAPIWebhookService:
 # Initialize service
 vapi_service = VAPIWebhookService()
 
+# Conference transfer context tracking
+TRANSFER_CTX = {}  # conf_name -> {"caller_call_sid": ..., "agent_call_sid": ...}
+
 
 
 @vapi_bp.route('/debug', methods=['GET'])
@@ -562,7 +565,7 @@ def start_transfer():
         # Extract required fields
         call_sid = data.get('call_sid')
         client_transfer_number = data.get('client_transfer_number')
-        timeout_secs = data.get('timeout_secs', 30)
+        timeout_secs = data.get('timeout_secs')
         
         if not call_sid:
             logger.error("No call_sid provided in start-transfer request")
@@ -571,6 +574,15 @@ def start_transfer():
         if not client_transfer_number:
             logger.error("No client_transfer_number provided in start-transfer request")
             return jsonify({'error': 'client_transfer_number is required'}), 400
+        
+        if timeout_secs is None:
+            logger.error("No timeout_secs provided in start-transfer request")
+            return jsonify({'error': 'timeout_secs is required'}), 400
+        
+        timeout_secs = int(timeout_secs)
+        if timeout_secs < 3 or timeout_secs > 60:
+            logger.error(f"Invalid timeout_secs: {timeout_secs}")
+            return jsonify({'error': 'timeout_secs must be between 3 and 60 seconds'}), 400
         
         logger.info(f"Starting transfer for call_sid: {call_sid}, transfer_number: {client_transfer_number}, timeout: {timeout_secs}s")
         
@@ -636,12 +648,17 @@ def start_transfer():
             agent_call = client.calls.create(
                 to=client_transfer_number,
                 from_=Config.TWILIO_PHONE_NUMBER,  # Assuming this is configured
-                twiml=str(response),
-                status_callback=f"{Config.APP_BASE_URL}/vapi/conference-update",
-                status_callback_event="initiated ringing answered completed"
+                twiml=str(response)
+                # Removed call status callback - relying on conference events only
             )
             
             logger.info(f"Initiated agent call {agent_call.sid} to {client_transfer_number}")
+            
+            # Store transfer context
+            TRANSFER_CTX[conf_name] = {
+                "caller_call_sid": call_sid,
+                "agent_call_sid": agent_call.sid,
+            }
             
         except Exception as e:
             logger.error(f"Error dialing agent: {e}")
@@ -651,47 +668,39 @@ def start_transfer():
         def timeout_watchdog():
             import time
             time.sleep(timeout_secs)
-            
+
             try:
-                # Check if agent joined (conference_status should be "agent_joined")
-                check_response = vapi_service.supabase\
-                    .table('twilio_call')\
-                    .select('conference_status')\
-                    .eq('call_sid', call_sid)\
-                    .execute()
-                
-                if check_response.data:
-                    current_status = check_response.data[0].get('conference_status')
-                    if current_status == 'transferring':  # Agent didn't join in time
-                        logger.info(f"Transfer timeout for call_sid: {call_sid}")
-                        
-                        # Update database: set conference_status="timeout_failed"
-                        vapi_service.supabase\
-                            .table('twilio_call')\
-                            .update({'conference_status': 'timeout_failed'})\
-                            .eq('call_sid', call_sid)\
-                            .execute()
-                        
-                        # Hang up the caller leg (this will end the conference due to endConferenceOnExit="true")
+                check_response = vapi_service.supabase.table('twilio_call')\
+                    .select('conference_status').eq('call_sid', call_sid).execute()
+                current_status = (check_response.data or [{}])[0].get('conference_status')
+
+                if current_status == 'transferring':
+                    logger.info(f"Transfer timeout for call_sid: {call_sid}")
+                    vapi_service.supabase.table('twilio_call')\
+                        .update({'conference_status': 'timeout_failed'})\
+                        .eq('call_sid', call_sid).execute()
+
+                    client_th = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
+                    # end agent if known
+                    ctx = TRANSFER_CTX.get(conf_name, {})
+                    agent_sid = ctx.get("agent_call_sid")
+                    if agent_sid:
                         try:
-                            client.calls(call_sid).update(status='completed')
-                            logger.info(f"Hung up caller leg {call_sid} due to timeout")
-                        except Exception as e:
-                            logger.error(f"Error hanging up caller leg: {e}")
-                        
-                        # Optionally hang up agent leg if still ringing
-                        try:
-                            # This would require tracking the agent call_sid, which we don't currently do
-                            # For now, we rely on the timeout in the TwiML to handle this
-                            pass
+                            client_th.calls(agent_sid).update(status='completed')
+                            logger.info(f"Hung up agent leg {agent_sid} due to timeout")
                         except Exception as e:
                             logger.error(f"Error hanging up agent leg: {e}")
-                    
-                    else:
-                        logger.info(f"Transfer completed successfully for call_sid: {call_sid}, status: {current_status}")
-                
+                    # end caller (ends conference)
+                    client_th.calls(call_sid).update(status='completed')
+                    logger.info(f"Hung up caller leg {call_sid} due to timeout")
+
+                    TRANSFER_CTX.pop(conf_name, None)
+                else:
+                    logger.info(f"Transfer completed successfully for call_sid: {call_sid}, status: {current_status}")
+                    TRANSFER_CTX.pop(conf_name, None)
             except Exception as e:
                 logger.error(f"Error in timeout watchdog: {e}")
+                TRANSFER_CTX.pop(conf_name, None)
         
         # Start the watchdog thread
         import threading
@@ -735,78 +744,58 @@ def conference_update():
         orig_call_sid = friendly_name[len('transfer_'):]
         logger.info(f"Mapped conference {friendly_name} to original call_sid: {orig_call_sid}")
         
-        # Handle different conference events
-        if status_callback_event == 'conference-start':
-            # First time we see a ConferenceSid, save it in DB
-            if conference_sid:
-                try:
-                    update_response = vapi_service.supabase\
-                        .table('twilio_call')\
-                        .update({'conference_sid': conference_sid})\
-                        .eq('call_sid', orig_call_sid)\
-                        .execute()
-                    
-                    if update_response.data:
-                        logger.info(f"Saved conference_sid {conference_sid} for call_sid {orig_call_sid}")
-                    else:
-                        logger.warning(f"No twilio_call record found for call_sid: {orig_call_sid}")
-                        
-                except Exception as e:
-                    logger.error(f"Error saving conference_sid: {e}")
+        # Get transfer context
+        ctx = TRANSFER_CTX.get(friendly_name, {})
+        agent_call_sid = ctx.get("agent_call_sid")
+        caller_call_sid = ctx.get("caller_call_sid", orig_call_sid)
         
-        elif status_callback_event == 'participant-join':
-            # Check if this is the agent joining
-            if call_sid and call_sid != orig_call_sid:
-                # This is the agent joining (different CallSid than the original caller)
+        # Save ConferenceSid whenever present
+        if conference_sid:
+            try:
+                vapi_service.supabase.table('twilio_call')\
+                    .update({'conference_sid': conference_sid})\
+                    .eq('call_sid', orig_call_sid).execute()
+                logger.info(f"Saved conference_sid {conference_sid} for call_sid {orig_call_sid}")
+            except Exception as e:
+                logger.error(f"Error saving conference_sid: {e}")
+        
+        # Handle different conference events
+        if status_callback_event == 'participant-join':
+            if call_sid == caller_call_sid:
+                # Customer joined - optional logging
+                logger.info(f"Customer joined conference: {call_sid}")
+            elif agent_call_sid and call_sid == agent_call_sid or call_sid != caller_call_sid:
+                # Agent joined - mark success
                 logger.info(f"Agent joined conference: {call_sid}")
                 
                 try:
-                    # Mark success: conference_status="agent_joined"
-                    update_response = vapi_service.supabase\
-                        .table('twilio_call')\
+                    vapi_service.supabase.table('twilio_call')\
                         .update({'conference_status': 'agent_joined'})\
-                        .eq('call_sid', orig_call_sid)\
-                        .execute()
-                    
-                    if update_response.data:
-                        logger.info(f"Updated conference_status to 'agent_joined' for call_sid: {orig_call_sid}")
-                    else:
-                        logger.warning(f"No twilio_call record found for call_sid: {orig_call_sid}")
-                        
+                        .eq('call_sid', orig_call_sid).execute()
+                    logger.info(f"Updated conference_status to 'agent_joined' for call_sid: {orig_call_sid}")
                 except Exception as e:
                     logger.error(f"Error updating conference_status: {e}")
                 
-                # Optionally end the VAPI leg for this conversation
-                # This would require tracking the VAPI call_sid, which we don't currently do
-                # For now, we let VAPI handle its own call termination
-                
-            else:
-                # This is just the customer entering the conference
-                logger.info(f"Customer joined conference: {call_sid}")
-                # Keep conference_status="transferring"
+                # Clean up transient map
+                TRANSFER_CTX.pop(friendly_name, None)
+                # OPTIONAL: end VAPI leg here
         
         elif status_callback_event == 'conference-end':
             # Conference ended
             logger.info(f"Conference ended: {conference_sid}")
             
             try:
-                # Set conference_status="ended"
-                update_response = vapi_service.supabase\
-                    .table('twilio_call')\
+                vapi_service.supabase.table('twilio_call')\
                     .update({'conference_status': 'ended'})\
-                    .eq('call_sid', orig_call_sid)\
-                    .execute()
-                
-                if update_response.data:
-                    logger.info(f"Updated conference_status to 'ended' for call_sid: {orig_call_sid}")
-                else:
-                    logger.warning(f"No twilio_call record found for call_sid: {orig_call_sid}")
-                    
+                    .eq('call_sid', orig_call_sid).execute()
+                logger.info(f"Updated conference_status to 'ended' for call_sid: {orig_call_sid}")
             except Exception as e:
                 logger.error(f"Error updating conference_status to ended: {e}")
+            
+            TRANSFER_CTX.pop(friendly_name, None)
         
         else:
-            # Other events (mute, hold, modify, speaker) - just log
+            # Other events (conference-start, mute, hold, modify, speaker) - just log
             logger.info(f"Conference event {status_callback_event} for call_sid: {call_sid}")
         
         return '', 200
