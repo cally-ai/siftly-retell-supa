@@ -243,26 +243,35 @@ class WebhookService:
                 logger.warning(f"twilio_number {to_number} has no client_id")
                 return None
 
-            # Step 2: Fetch client_dynamic_variables
+            # Step 2: Fetch client_vapi_dynamic_variables from the new view table
             dynamic_variables: Dict[str, Any] = {}
-            cdv_resp = self.supabase.table('client_dynamic_variables').select('*').eq('client_id', client_id).limit(1).execute()
+            cdv_resp = self.supabase.table('client_vapi_dynamic_variables').select('*').eq('client_id', client_id).limit(1).execute()
             if cdv_resp.data:
                 cdv = cdv_resp.data[0]
+                
+                # Add all fields from the view except client_id
                 for k, v in cdv.items():
-                    if k not in ('id', 'client_id') and v is not None:
+                    if k not in ('client_id') and v is not None:
                         dynamic_variables[k] = v
-
-            # Step 3: Fetch client_language_agent_name key pairs
-            clan_resp = self.supabase.table('client_language_agent_name').select('key_pair').eq('client_id', client_id).execute()
-            for rec in clan_resp.data or []:
-                key_pair_value = rec.get('key_pair') or ''
-                if isinstance(key_pair_value, str) and '=' in key_pair_value:
-                    parts = key_pair_value.split('=', 1)
-                    if len(parts) == 2:
-                        key = parts[0].strip()
-                        value = parts[1].strip()
-                        if key:
-                            dynamic_variables[key] = value
+                
+                # Handle workflow_variables - flatten them into the main response
+                workflow_variables = cdv.get('workflow_variables', {})
+                if isinstance(workflow_variables, dict):
+                    for k, v in workflow_variables.items():
+                        if v is not None:
+                            dynamic_variables[k] = v
+                
+                # Handle agent__name array - convert to key-value pairs
+                agent_names = cdv.get('agent__name', [])
+                if isinstance(agent_names, list):
+                    for agent_name_pair in agent_names:
+                        if isinstance(agent_name_pair, str) and '=' in agent_name_pair:
+                            parts = agent_name_pair.split('=', 1)
+                            if len(parts) == 2:
+                                key = parts[0].strip()
+                                value = parts[1].strip()
+                                if key:
+                                    dynamic_variables[key] = value
 
             logger.info(f"Returning dynamic variables from Supabase: {list(dynamic_variables.keys())}")
             logger.info(f"=== SUPABASE LOOKUP END (async) ===")
