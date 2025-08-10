@@ -714,12 +714,37 @@ def start_transfer():
             
             deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_secs)
             
+            # Update the original IVR call record with transfer info
             vapi_service.supabase.table('twilio_call').update({
                 'conference_name': conf_name,
-                'agent_call_sid': agent_call.sid,
                 'transfer_timeout_at': deadline.isoformat(),
-                'transfer_started_at': datetime.now(timezone.utc).isoformat(),  # optional
+                'transfer_started_at': datetime.now(timezone.utc).isoformat(),
             }).eq('call_sid', call_sid).execute()
+            
+            # Create a new twilio_call record for the agent call
+            agent_call_data = {
+                'call_sid': agent_call.sid,
+                'call_type': 'transfer',
+                'parent_id': call_sid,  # Link to the original IVR call
+                'conference_name': conf_name,
+                'from_number': client_twilio_number,
+                'to_number': client_transfer_number,
+                'direction': 'outbound-api',
+                'start_time': datetime.now(timezone.utc).isoformat(),
+                'conference_status': 'transferring'
+            }
+            
+            # Get vapi_webhook_event_id from the original call record
+            original_call_response = vapi_service.supabase.table('twilio_call')\
+                .select('vapi_webhook_event_id')\
+                .eq('call_sid', call_sid)\
+                .execute()
+            
+            if original_call_response.data and original_call_response.data[0].get('vapi_webhook_event_id'):
+                agent_call_data['vapi_webhook_event_id'] = original_call_response.data[0]['vapi_webhook_event_id']
+            
+            vapi_service.supabase.table('twilio_call').insert(agent_call_data).execute()
+            logger.info(f"Created agent call record: {agent_call.sid} for transfer")
             
             # Keep TRANSFER_CTX for fast lookup (nice to have), but DB is the source of truth
             TRANSFER_CTX[conf_name] = {
@@ -745,9 +770,17 @@ def start_transfer():
 
                 if current_status == 'transferring':
                     logger.info(f"Transfer timeout for call_sid: {call_sid}")
+                    
+                    # Update original IVR call record
                     vapi_service.supabase.table('twilio_call')\
                         .update({'conference_status': 'timeout_failed'})\
                         .eq('call_sid', call_sid).execute()
+                    
+                    # Update agent call record
+                    vapi_service.supabase.table('twilio_call')\
+                        .update({'conference_status': 'timeout_failed'})\
+                        .eq('parent_id', call_sid)\
+                        .eq('call_type', 'transfer').execute()
 
                     # end agent if known (use DB as source of truth)
                     agent_sid = None
@@ -837,13 +870,21 @@ def conference_update():
             agent_call_sid = (row.data or [{}])[0].get('agent_call_sid')
             logger.info(f"Retrieved agent_call_sid {agent_call_sid} from DB for call_sid {orig_call_sid}")
         
-        # Save ConferenceSid whenever present
+        # Save ConferenceSid whenever present (update both IVR and agent call records)
         if conference_sid:
             try:
+                # Update original IVR call record
                 vapi_service.supabase.table('twilio_call')\
                     .update({'conference_sid': conference_sid})\
                     .eq('call_sid', orig_call_sid).execute()
-                logger.info(f"Saved conference_sid {conference_sid} for call_sid {orig_call_sid}")
+                
+                # Update agent call record if it exists
+                vapi_service.supabase.table('twilio_call')\
+                    .update({'conference_sid': conference_sid})\
+                    .eq('parent_id', orig_call_sid)\
+                    .eq('call_type', 'transfer').execute()
+                
+                logger.info(f"Saved conference_sid {conference_sid} for call_sid {orig_call_sid} and agent call")
             except Exception as e:
                 logger.error(f"Error saving conference_sid: {e}")
         
@@ -871,10 +912,18 @@ def conference_update():
                     logger.info(f"Agent joined conference: {call_sid}")
                     
                     try:
+                        # Update original IVR call record
                         vapi_service.supabase.table('twilio_call')\
                             .update({'conference_status': 'agent_joined'})\
                             .eq('call_sid', orig_call_sid).execute()
-                        logger.info(f"Updated conference_status to 'agent_joined' for call_sid: {orig_call_sid}")
+                        
+                        # Update agent call record
+                        vapi_service.supabase.table('twilio_call')\
+                            .update({'conference_status': 'agent_joined'})\
+                            .eq('parent_id', orig_call_sid)\
+                            .eq('call_type', 'transfer').execute()
+                        
+                        logger.info(f"Updated conference_status to 'agent_joined' for call_sid: {orig_call_sid} and agent call")
                     except Exception as e:
                         logger.error(f"Error updating conference_status: {e}")
                     
@@ -889,10 +938,18 @@ def conference_update():
             logger.info(f"Conference ended: {conference_sid}")
             
             try:
+                # Update original IVR call record
                 vapi_service.supabase.table('twilio_call')\
                     .update({'conference_status': 'ended'})\
                     .eq('call_sid', orig_call_sid).execute()
-                logger.info(f"Updated conference_status to 'ended' for call_sid: {orig_call_sid}")
+                
+                # Update agent call record
+                vapi_service.supabase.table('twilio_call')\
+                    .update({'conference_status': 'ended'})\
+                    .eq('parent_id', orig_call_sid)\
+                    .eq('call_type', 'transfer').execute()
+                
+                logger.info(f"Updated conference_status to 'ended' for call_sid: {orig_call_sid} and agent call")
             except Exception as e:
                 logger.error(f"Error updating conference_status to ended: {e}")
             
