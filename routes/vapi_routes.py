@@ -208,6 +208,36 @@ vapi_service = VAPIWebhookService()
 # Conference transfer context tracking
 TRANSFER_CTX = {}  # conf_name -> {"caller_call_sid": ..., "agent_call_sid": ...}
 
+def end_vapi_leg_for(orig_call_sid: str):
+    """End the VAPI leg for a given caller to save AI minutes"""
+    try:
+        # Example: if you store the 3 legs with the same vapi_webhook_event_id
+        row = vapi_service.supabase.table('twilio_call')\
+            .select('call_sid')\
+            .eq('related_caller_sid', orig_call_sid)\
+            .eq('call_type', 'vapi')\
+            .limit(1).execute()
+        vapi_sid = (row.data or [{}])[0].get('call_sid')
+        if vapi_sid:
+            from twilio.rest import Client
+            Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)\
+                .calls(vapi_sid).update(status='completed')
+            logger.info(f"Ended VAPI leg {vapi_sid} for caller {orig_call_sid}")
+    except Exception as e:
+        logger.error(f"Error ending VAPI leg for {orig_call_sid}: {e}")
+
+def _is_valid_twilio_request(req) -> bool:
+    """Validate Twilio signature for security"""
+    try:
+        from twilio.request_validator import RequestValidator
+        validator = RequestValidator(Config.TWILIO_AUTH_TOKEN)
+        url = request.url  # must be the full URL Twilio used (https!)
+        params = request.form.to_dict()
+        signature = request.headers.get('X-Twilio-Signature', '')
+        return validator.validate(url, params, signature)
+    except Exception:
+        return False
+
 
 
 @vapi_bp.route('/debug', methods=['GET'])
@@ -668,6 +698,8 @@ def start_transfer():
         def timeout_watchdog():
             import time
             time.sleep(timeout_secs)
+            from twilio.rest import Client
+            client_th = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
 
             try:
                 check_response = vapi_service.supabase.table('twilio_call')\
@@ -680,7 +712,6 @@ def start_transfer():
                         .update({'conference_status': 'timeout_failed'})\
                         .eq('call_sid', call_sid).execute()
 
-                    client_th = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
                     # end agent if known
                     ctx = TRANSFER_CTX.get(conf_name, {})
                     agent_sid = ctx.get("agent_call_sid")
@@ -725,6 +756,11 @@ def start_transfer():
 def conference_update():
     """Handle Twilio conference webhooks"""
     try:
+        # Validate Twilio signature in production
+        if Config.FLASK_ENV == 'production' and not _is_valid_twilio_request(request):
+            logger.warning("Invalid Twilio signature")
+            return '', 403
+        
         # Log the full payload for debugging
         logger.info(f"Conference webhook received - Full payload: {dict(request.form)}")
         
@@ -764,21 +800,37 @@ def conference_update():
             if call_sid == caller_call_sid:
                 # Customer joined - optional logging
                 logger.info(f"Customer joined conference: {call_sid}")
-            elif agent_call_sid and call_sid == agent_call_sid or call_sid != caller_call_sid:
-                # Agent joined - mark success
-                logger.info(f"Agent joined conference: {call_sid}")
-                
+                # Optional: mark caller_joined in DB for cleaner telemetry
                 try:
                     vapi_service.supabase.table('twilio_call')\
-                        .update({'conference_status': 'agent_joined'})\
+                        .update({'conference_status': 'caller_joined'})\
                         .eq('call_sid', orig_call_sid).execute()
-                    logger.info(f"Updated conference_status to 'agent_joined' for call_sid: {orig_call_sid}")
                 except Exception as e:
-                    logger.error(f"Error updating conference_status: {e}")
-                
-                # Clean up transient map
-                TRANSFER_CTX.pop(friendly_name, None)
-                # OPTIONAL: end VAPI leg here
+                    logger.error(f"Error updating conference_status to caller_joined: {e}")
+            else:
+                is_agent = False
+                if agent_call_sid:
+                    is_agent = (call_sid == agent_call_sid)
+                else:
+                    # fallback: treat any non-caller as agent if we didn't store agent sid
+                    is_agent = True
+
+                if is_agent:
+                    logger.info(f"Agent joined conference: {call_sid}")
+                    
+                    try:
+                        vapi_service.supabase.table('twilio_call')\
+                            .update({'conference_status': 'agent_joined'})\
+                            .eq('call_sid', orig_call_sid).execute()
+                        logger.info(f"Updated conference_status to 'agent_joined' for call_sid: {orig_call_sid}")
+                    except Exception as e:
+                        logger.error(f"Error updating conference_status: {e}")
+                    
+                    # Clean up transient map
+                    TRANSFER_CTX.pop(friendly_name, None)
+                    
+                    # OPTIONAL: end VAPI leg here to save AI minutes
+                    end_vapi_leg_for(orig_call_sid)
         
         elif status_callback_event == 'conference-end':
             # Conference ended

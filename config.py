@@ -28,6 +28,7 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
     FLASK_ENV = os.getenv('FLASK_ENV', 'production')
     DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    ENV = os.getenv('ENV', 'production')  # For environment detection
     
     # Airtable removed
     
