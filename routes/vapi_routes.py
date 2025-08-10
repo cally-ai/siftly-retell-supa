@@ -595,6 +595,7 @@ def start_transfer():
         # Extract required fields
         call_sid = data.get('call_sid')
         client_transfer_number = data.get('client_transfer_number')
+        client_id = data.get('client_id')
         timeout_secs = data.get('timeout_secs')
         
         if not call_sid:
@@ -604,6 +605,30 @@ def start_transfer():
         if not client_transfer_number:
             logger.error("No client_transfer_number provided in start-transfer request")
             return jsonify({'error': 'client_transfer_number is required'}), 400
+        
+        if not client_id:
+            logger.error("No client_id provided in start-transfer request")
+            return jsonify({'error': 'client_id is required'}), 400
+        
+        # Get client's Twilio number from database
+        try:
+            twilio_number_response = vapi_service.supabase\
+                .table('twilio_number')\
+                .select('twilio_number')\
+                .eq('client_id', client_id)\
+                .limit(1)\
+                .execute()
+            
+            if not twilio_number_response.data:
+                logger.error(f"No twilio_number found for client_id: {client_id}")
+                return jsonify({'error': 'No Twilio number configured for this client'}), 404
+            
+            client_twilio_number = twilio_number_response.data[0]['twilio_number']
+            logger.info(f"Using client Twilio number: {client_twilio_number} for client_id: {client_id}")
+            
+        except Exception as e:
+            logger.error(f"Error fetching client Twilio number: {e}")
+            return jsonify({'error': 'Failed to fetch client Twilio number'}), 500
         
         if timeout_secs is None:
             logger.error("No timeout_secs provided in start-transfer request")
@@ -677,7 +702,7 @@ def start_transfer():
             # Make the call to the agent
             agent_call = client.calls.create(
                 to=client_transfer_number,
-                from_=Config.TWILIO_PHONE_NUMBER,  # Assuming this is configured
+                from_=client_twilio_number,  # Use client-specific Twilio number
                 twiml=str(response)
                 # Removed call status callback - relying on conference events only
             )
