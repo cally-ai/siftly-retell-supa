@@ -350,11 +350,32 @@ def get_client_dynamic_variables():
         # Return call_id and dynamic variables as flat structure
         call_id = event.get('call_id')
         
-        # Create flat response with call_id and all dynamic variables at root level
+        # Get call_sid from linked twilio_call record with call_type "ivr"
+        call_sid = None
+        if event.get('id'):  # Make sure we have a vapi_webhook_event_id
+            twilio_call_resp = vapi_service.supabase\
+                .table('twilio_call')\
+                .select('call_sid')\
+                .eq('vapi_webhook_event_id', event.get('id'))\
+                .eq('call_type', 'ivr')\
+                .limit(1)\
+                .execute()
+            
+            if twilio_call_resp.data:
+                call_sid = twilio_call_resp.data[0].get('call_sid')
+                logger.info(f"Found call_sid: {call_sid} from twilio_call record")
+            else:
+                logger.warning(f"No twilio_call record found with call_type 'ivr' for vapi_webhook_event_id: {event.get('id')}")
+        
+        # Create flat response with call_id, call_sid and all dynamic variables at root level
         response_data = {
             "call_id": call_id,
             **dynamic_variables  # Unpack all dynamic variables at root level
         }
+        
+        # Add call_sid if found
+        if call_sid:
+            response_data["call_sid"] = call_sid
         
         logger.info(f"Returning call_id: {call_id} and {len(dynamic_variables)} dynamic variables")
         logger.info(f"Response payload: {response_data}")
@@ -524,4 +545,315 @@ def vapi_new_incoming_call_event():
         
     except Exception as e:
         logger.error(f"Error processing VAPI new incoming call event webhook: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+# Conference transfer flow routes
+
+@vapi_bp.route('/start-transfer', methods=['POST'])
+def start_transfer():
+    """Start a conference transfer from VAPI to an agent"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            logger.error("No JSON data received for start-transfer")
+            return jsonify({'error': 'No JSON data received'}), 400
+        
+        # Extract required fields
+        call_sid = data.get('call_sid')
+        client_transfer_number = data.get('client_transfer_number')
+        timeout_secs = data.get('timeout_secs', 30)
+        
+        if not call_sid:
+            logger.error("No call_sid provided in start-transfer request")
+            return jsonify({'error': 'call_sid is required'}), 400
+        
+        if not client_transfer_number:
+            logger.error("No client_transfer_number provided in start-transfer request")
+            return jsonify({'error': 'client_transfer_number is required'}), 400
+        
+        logger.info(f"Starting transfer for call_sid: {call_sid}, transfer_number: {client_transfer_number}, timeout: {timeout_secs}s")
+        
+        # Build conference name
+        conf_name = f"transfer_{call_sid}"
+        
+        # Update database: set conference_status="transferring"
+        try:
+            update_response = vapi_service.supabase\
+                .table('twilio_call')\
+                .update({
+                    'conference_status': 'transferring',
+                    'conference_sid': None  # Clear any old conference_sid
+                })\
+                .eq('call_sid', call_sid)\
+                .execute()
+            
+            if not update_response.data:
+                logger.error(f"No twilio_call record found for call_sid: {call_sid}")
+                return jsonify({'error': 'Call record not found'}), 404
+            
+            logger.info(f"Updated twilio_call record for call_sid: {call_sid} with conference_status=transferring")
+            
+        except Exception as e:
+            logger.error(f"Error updating twilio_call record: {e}")
+            return jsonify({'error': 'Database update failed'}), 500
+        
+        # Move the caller into the conference (hold)
+        try:
+            from twilio.rest import Client
+            client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
+            
+            # Update the caller's call to join the conference
+            caller_update = client.calls(call_sid).update(
+                url=f"{Config.APP_BASE_URL}/vapi/twiml/conference?name={conf_name}&role=caller",
+                method="POST"
+            )
+            
+            logger.info(f"Updated caller call {call_sid} to join conference {conf_name}")
+            
+        except Exception as e:
+            logger.error(f"Error updating caller call: {e}")
+            return jsonify({'error': 'Failed to update caller call'}), 500
+        
+        # Dial the agent with TwiML that joins the same conference
+        try:
+            from twilio.twiml.voice_response import VoiceResponse, Dial, Conference
+            
+            # Create TwiML for agent dial
+            response = VoiceResponse()
+            dial = response.dial(timeout=timeout_secs)
+            conference = dial.conference(
+                conf_name,
+                start_conference_on_enter=True,
+                end_conference_on_exit=False,
+                beep=False,
+                wait_url="http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical",
+                status_callback=f"{Config.APP_BASE_URL}/vapi/conference-update",
+                status_callback_event="start end join leave mute hold modify speaker"
+            )
+            
+            # Make the call to the agent
+            agent_call = client.calls.create(
+                to=client_transfer_number,
+                from_=Config.TWILIO_PHONE_NUMBER,  # Assuming this is configured
+                twiml=str(response),
+                status_callback=f"{Config.APP_BASE_URL}/vapi/conference-update",
+                status_callback_event="initiated ringing answered completed"
+            )
+            
+            logger.info(f"Initiated agent call {agent_call.sid} to {client_transfer_number}")
+            
+        except Exception as e:
+            logger.error(f"Error dialing agent: {e}")
+            return jsonify({'error': 'Failed to dial agent'}), 500
+        
+        # Start watchdog thread for timeout
+        def timeout_watchdog():
+            import time
+            time.sleep(timeout_secs)
+            
+            try:
+                # Check if agent joined (conference_status should be "agent_joined")
+                check_response = vapi_service.supabase\
+                    .table('twilio_call')\
+                    .select('conference_status')\
+                    .eq('call_sid', call_sid)\
+                    .execute()
+                
+                if check_response.data:
+                    current_status = check_response.data[0].get('conference_status')
+                    if current_status == 'transferring':  # Agent didn't join in time
+                        logger.info(f"Transfer timeout for call_sid: {call_sid}")
+                        
+                        # Update database: set conference_status="timeout_failed"
+                        vapi_service.supabase\
+                            .table('twilio_call')\
+                            .update({'conference_status': 'timeout_failed'})\
+                            .eq('call_sid', call_sid)\
+                            .execute()
+                        
+                        # Hang up the caller leg (this will end the conference due to endConferenceOnExit="true")
+                        try:
+                            client.calls(call_sid).update(status='completed')
+                            logger.info(f"Hung up caller leg {call_sid} due to timeout")
+                        except Exception as e:
+                            logger.error(f"Error hanging up caller leg: {e}")
+                        
+                        # Optionally hang up agent leg if still ringing
+                        try:
+                            # This would require tracking the agent call_sid, which we don't currently do
+                            # For now, we rely on the timeout in the TwiML to handle this
+                            pass
+                        except Exception as e:
+                            logger.error(f"Error hanging up agent leg: {e}")
+                    
+                    else:
+                        logger.info(f"Transfer completed successfully for call_sid: {call_sid}, status: {current_status}")
+                
+            except Exception as e:
+                logger.error(f"Error in timeout watchdog: {e}")
+        
+        # Start the watchdog thread
+        import threading
+        watchdog_thread = threading.Thread(target=timeout_watchdog)
+        watchdog_thread.daemon = True
+        watchdog_thread.start()
+        
+        logger.info(f"Started timeout watchdog for {timeout_secs} seconds")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Transfer initiated',
+            'conference_name': conf_name,
+            'agent_call_sid': agent_call.sid if 'agent_call' in locals() else None
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in start-transfer: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+@vapi_bp.route('/conference-update', methods=['POST'])
+def conference_update():
+    """Handle Twilio conference webhooks"""
+    try:
+        # Log the full payload for debugging
+        logger.info(f"Conference webhook received - Full payload: {dict(request.form)}")
+        
+        # Extract webhook data
+        status_callback_event = request.form.get('StatusCallbackEvent')
+        conference_sid = request.form.get('ConferenceSid')
+        friendly_name = request.form.get('FriendlyName')
+        call_sid = request.form.get('CallSid')
+        
+        logger.info(f"Conference event: {status_callback_event}, SID: {conference_sid}, Name: {friendly_name}, CallSid: {call_sid}")
+        
+        # Map FriendlyName → original caller call_sid
+        if not friendly_name or not friendly_name.startswith('transfer_'):
+            logger.warning(f"Invalid conference friendly name: {friendly_name}")
+            return '', 200
+        
+        orig_call_sid = friendly_name[len('transfer_'):]
+        logger.info(f"Mapped conference {friendly_name} to original call_sid: {orig_call_sid}")
+        
+        # Handle different conference events
+        if status_callback_event == 'conference-start':
+            # First time we see a ConferenceSid, save it in DB
+            if conference_sid:
+                try:
+                    update_response = vapi_service.supabase\
+                        .table('twilio_call')\
+                        .update({'conference_sid': conference_sid})\
+                        .eq('call_sid', orig_call_sid)\
+                        .execute()
+                    
+                    if update_response.data:
+                        logger.info(f"Saved conference_sid {conference_sid} for call_sid {orig_call_sid}")
+                    else:
+                        logger.warning(f"No twilio_call record found for call_sid: {orig_call_sid}")
+                        
+                except Exception as e:
+                    logger.error(f"Error saving conference_sid: {e}")
+        
+        elif status_callback_event == 'participant-join':
+            # Check if this is the agent joining
+            if call_sid and call_sid != orig_call_sid:
+                # This is the agent joining (different CallSid than the original caller)
+                logger.info(f"Agent joined conference: {call_sid}")
+                
+                try:
+                    # Mark success: conference_status="agent_joined"
+                    update_response = vapi_service.supabase\
+                        .table('twilio_call')\
+                        .update({'conference_status': 'agent_joined'})\
+                        .eq('call_sid', orig_call_sid)\
+                        .execute()
+                    
+                    if update_response.data:
+                        logger.info(f"Updated conference_status to 'agent_joined' for call_sid: {orig_call_sid}")
+                    else:
+                        logger.warning(f"No twilio_call record found for call_sid: {orig_call_sid}")
+                        
+                except Exception as e:
+                    logger.error(f"Error updating conference_status: {e}")
+                
+                # Optionally end the VAPI leg for this conversation
+                # This would require tracking the VAPI call_sid, which we don't currently do
+                # For now, we let VAPI handle its own call termination
+                
+            else:
+                # This is just the customer entering the conference
+                logger.info(f"Customer joined conference: {call_sid}")
+                # Keep conference_status="transferring"
+        
+        elif status_callback_event == 'conference-end':
+            # Conference ended
+            logger.info(f"Conference ended: {conference_sid}")
+            
+            try:
+                # Set conference_status="ended"
+                update_response = vapi_service.supabase\
+                    .table('twilio_call')\
+                    .update({'conference_status': 'ended'})\
+                    .eq('call_sid', orig_call_sid)\
+                    .execute()
+                
+                if update_response.data:
+                    logger.info(f"Updated conference_status to 'ended' for call_sid: {orig_call_sid}")
+                else:
+                    logger.warning(f"No twilio_call record found for call_sid: {orig_call_sid}")
+                    
+            except Exception as e:
+                logger.error(f"Error updating conference_status to ended: {e}")
+        
+        else:
+            # Other events (mute, hold, modify, speaker) - just log
+            logger.info(f"Conference event {status_callback_event} for call_sid: {call_sid}")
+        
+        return '', 200
+        
+    except Exception as e:
+        logger.error(f"Error in conference-update: {e}")
+        return '', 500
+
+@vapi_bp.route('/twiml/conference', methods=['GET', 'POST'])
+def twiml_conference():
+    """Return TwiML to join a named conference"""
+    try:
+        # Get query parameters
+        name = request.args.get('name')
+        role = request.args.get('role', 'caller')  # Default to caller
+        
+        if not name:
+            logger.error("No conference name provided")
+            return jsonify({'error': 'Conference name is required'}), 400
+        
+        logger.info(f"Generating TwiML for conference: {name}, role: {role}")
+        
+        # Create TwiML response
+        from twilio.twiml.voice_response import VoiceResponse, Dial, Conference
+        
+        response = VoiceResponse()
+        dial = response.dial()
+        
+        # Configure conference based on role
+        start_conference_on_enter = role != 'caller'  # False for caller, True for agent
+        end_conference_on_exit = role == 'caller'     # True for caller, False for agent
+        
+        conference = dial.conference(
+            name,
+            start_conference_on_enter=start_conference_on_enter,
+            end_conference_on_exit=end_conference_on_exit,
+            beep=False,
+            wait_url="http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical",
+            status_callback=f"{Config.APP_BASE_URL}/vapi/conference-update",
+            status_callback_event="start end join leave mute hold modify speaker"
+        )
+        
+        logger.info(f"Generated TwiML for conference {name} with role {role}")
+        
+        from flask import Response
+        return Response(str(response), mimetype='text/xml')
+        
+    except Exception as e:
+        logger.error(f"Error generating conference TwiML: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500 

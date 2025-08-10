@@ -13,6 +13,8 @@ print("=== ENVIRONMENT VARIABLES DEBUG ===")
 print(f"VAPI_API_KEY: {os.getenv('VAPI_API_KEY', 'NOT SET')}")
 print(f"TWILIO_ACCOUNT_SID: {os.getenv('TWILIO_ACCOUNT_SID', 'NOT SET')}")
 print(f"TWILIO_AUTH_TOKEN: {os.getenv('TWILIO_AUTH_TOKEN', 'NOT SET')}")
+print(f"TWILIO_PHONE_NUMBER: {os.getenv('TWILIO_PHONE_NUMBER', 'NOT SET')}")
+print(f"APP_BASE_URL: {os.getenv('APP_BASE_URL', 'https://siftly.onrender.com')}")
 print(f"OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY', 'NOT SET')}")
 print(f"DEEPGRAM_API_KEY: {os.getenv('DEEPGRAM_API_KEY', 'NOT SET')}")
 print(f"SUPABASE_URL: {os.getenv('SUPABASE_URL', 'NOT SET')}")
@@ -39,6 +41,8 @@ class Config:
     # Twilio Configuration
     TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
     TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+    TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
+    APP_BASE_URL = os.getenv('APP_BASE_URL', 'https://siftly.onrender.com')
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
