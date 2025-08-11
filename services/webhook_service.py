@@ -249,9 +249,9 @@ class WebhookService:
             if cdv_resp.data:
                 cdv = cdv_resp.data[0]
                 
-                # Add all fields from the view except client_id
+                # Add all fields from the view except client_id and nested objects
                 for k, v in cdv.items():
-                    if k not in ('client_id') and v is not None:
+                    if k not in ('client_id', 'workflow_variables', 'agent__name') and v is not None:
                         dynamic_variables[k] = v
                 
                 # Handle workflow_variables - flatten them into the main response
