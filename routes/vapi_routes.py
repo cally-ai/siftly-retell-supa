@@ -1046,4 +1046,18 @@ def check_business_hours():
         
     except Exception as e:
         logger.error(f"Error in business hours check: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+@vapi_bp.route('/log-payload', methods=['POST'])
+def log_payload():
+    """Log the full payload received in the request"""
+    try:
+        # Log the full payload for debugging
+        logger.info(f"Log-payload request received - Full payload: {request.get_json()}")
+        
+        # Return success response
+        return jsonify({'status': 'success', 'message': 'Payload logged successfully'}), 200
+        
+    except Exception as e:
+        logger.error(f"Error in log-payload: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500 
