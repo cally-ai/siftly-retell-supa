@@ -403,6 +403,7 @@ def get_client_dynamic_variables():
         # Create flat response with call_id, call_sid and all dynamic variables at root level
         response_data = {
             "call_id": call_id,
+            "client_id": client_id,  # Add client_id from the matched event
             **dynamic_variables  # Unpack all dynamic variables at root level
         }
         
