@@ -262,6 +262,9 @@ def vapi_debug():
 def get_client_dynamic_variables():
     """Get dynamic variables for a client based on phone number"""
     try:
+        # Log the full payload for debugging
+        logger.info(f"Get-client-dynamic-variables request received - Full payload: {request.get_json()}")
+        
         data = request.get_json()
         
         # Log the full payload for debugging
