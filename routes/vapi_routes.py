@@ -1006,4 +1006,37 @@ def twiml_conference():
         
     except Exception as e:
         logger.error(f"Error generating conference TwiML: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+@vapi_bp.route('/check-business-hours', methods=['POST'])
+def check_business_hours():
+    """Check if current time is within business hours for a client"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            logger.error("No JSON data received for check-business-hours")
+            return jsonify({'error': 'No JSON data received'}), 400
+        
+        # Extract required fields
+        client_id = data.get('client_id')
+        
+        if not client_id:
+            logger.error("No client_id provided in check-business-hours request")
+            return jsonify({'error': 'client_id is required'}), 400
+        
+        # Process the business hours check
+        from services.webhook_service import webhook_service
+        result = webhook_service.process_business_hours_check({
+            'name': 'siftly_check_business_hours',
+            'args': {'client_id': client_id}
+        })
+        
+        # Convert string response to boolean
+        within_hours = result.get('within_business_hours') == '1'
+        
+        return jsonify({'within_business_hours': within_hours}), 200
+        
+    except Exception as e:
+        logger.error(f"Error in business hours check: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500 
