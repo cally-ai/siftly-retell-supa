@@ -109,17 +109,17 @@ class WebhookService:
                     opening_hours, current_weekday, current_time_str
                 )
                 
-                result = {"within_business_hours": "1" if within_hours else "0"}
+                result = {"within_business_hours": within_hours}
                 logger.info(f"Business hours check result: {result}")
                 return result
                 
             except pytz.exceptions.UnknownTimeZoneError:
                 logger.error(f"Invalid timezone: {timezone_str}")
-                return {"within_business_hours": "0"}
+                return {"within_business_hours": False}
                 
         except Exception as e:
             logger.error(f"Error processing business hours check: {e}")
-            return {"within_business_hours": "0"}
+            return {"within_business_hours": False}
 
     def _get_client_business_hours(self, client_id: str) -> Optional[Dict[str, Any]]:
         """

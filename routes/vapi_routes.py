@@ -1033,8 +1033,8 @@ def check_business_hours():
             'args': {'client_id': client_id}
         })
         
-        # Convert string response to boolean
-        within_hours = result.get('within_business_hours') == '1'
+        # Get boolean response directly
+        within_hours = result.get('within_business_hours', False)
         
         return jsonify({'within_business_hours': within_hours}), 200
         
