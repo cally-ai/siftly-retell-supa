@@ -587,6 +587,9 @@ def vapi_new_incoming_call_event():
 def start_transfer():
     """Start a conference transfer from VAPI to an agent"""
     try:
+        # Log the full payload for debugging
+        logger.info(f"Start-transfer request received - Full payload: {request.get_json()}")
+        
         data = request.get_json()
         
         if not data:
