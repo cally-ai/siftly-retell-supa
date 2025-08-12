@@ -440,6 +440,12 @@ def vapi_new_incoming_call_event():
             logger.warning("No JSON data received for new incoming call event")
             return jsonify({'error': 'No JSON data received'}), 400
         
+        # Extract toolCallId from the request (required for VAPI tool call response)
+        tool_call_list = data.get('message', {}).get('toolCallList', [])
+        tool_call_id = None
+        if tool_call_list and len(tool_call_list) > 0:
+            tool_call_id = tool_call_list[0].get('id')
+        
         # Extract call_id and other data from the webhook payload
         message = data.get('message', {})
         call_id = message.get('call', {}).get('id')
@@ -578,12 +584,41 @@ def vapi_new_incoming_call_event():
             logger.error(f"Error saving detailed call data to Supabase: {e}")
             # Continue processing even if Supabase save fails
         
-        # Acknowledge the webhook with a success response
-        return jsonify({'status': 'success', 'message': 'New incoming call event received and processed'}), 200
+        # Return VAPI tool call response format
+        if tool_call_id:
+            response_data = {
+                "results": [
+                    {
+                        "toolCallId": tool_call_id,
+                        "result": "New incoming call event received and processed successfully"
+                    }
+                ]
+            }
+        else:
+            # Fallback if no toolCallId found
+            response_data = {
+                "results": [
+                    {
+                        "toolCallId": "unknown",
+                        "result": "New incoming call event received and processed successfully"
+                    }
+                ]
+            }
+        
+        return jsonify(response_data), 200
         
     except Exception as e:
         logger.error(f"Error processing VAPI new incoming call event webhook: {e}")
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+        # Return error in VAPI tool call format
+        error_response = {
+            "results": [
+                {
+                    "toolCallId": "unknown",
+                    "result": f"Error processing call event: {str(e)}"
+                }
+            ]
+        }
+        return jsonify(error_response), 200  # VAPI expects 200 even for errors
 
 # Conference transfer flow routes
 
