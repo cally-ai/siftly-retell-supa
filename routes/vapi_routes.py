@@ -1058,9 +1058,6 @@ def check_business_hours():
 def save_live_call_transcript():
     """Save live call transcript from VAPI payload"""
     try:
-        # Log the full payload for debugging
-        logger.info(f"Save-live-call-transcript request received - Full payload: {request.get_json()}")
-        
         data = request.get_json()
         
         if not data:
@@ -1075,13 +1072,11 @@ def save_live_call_transcript():
             logger.error("No vapi_webhook_event_id found in variables")
             return jsonify({'error': 'vapi_webhook_event_id is required in variables'}), 400
         
-        logger.info(f"Processing transcript for vapi_webhook_event_id: {vapi_webhook_event_id}")
-        
         # Extract messagesOpenAIFormatted from payload
         messages = data.get('message', {}).get('artifact', {}).get('messagesOpenAIFormatted', [])
         
         if not messages:
-            logger.warning("No messagesOpenAIFormatted found in payload")
+            logger.error("No messagesOpenAIFormatted found in payload")
             return jsonify({'error': 'No messages found in payload'}), 400
         
         # Build transcript from messages
@@ -1114,10 +1109,8 @@ def save_live_call_transcript():
         transcript = '\n'.join(lines)
         
         if not transcript:
-            logger.warning("No transcript content generated")
+            logger.error("No transcript content generated")
             return jsonify({'error': 'No transcript content found'}), 400
-        
-        logger.info(f"Generated transcript with {len(lines)} lines for vapi_webhook_event_id: {vapi_webhook_event_id}")
         
         # Save transcript to database
         try:
@@ -1130,8 +1123,6 @@ def save_live_call_transcript():
             if not update_response.data:
                 logger.error(f"No vapi_webhook_event record found for id: {vapi_webhook_event_id}")
                 return jsonify({'error': 'vapi_webhook_event record not found'}), 404
-            
-            logger.info(f"Successfully saved transcript for vapi_webhook_event_id: {vapi_webhook_event_id}")
             
             return jsonify({
                 'status': 'success',
