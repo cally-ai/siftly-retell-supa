@@ -785,9 +785,7 @@ def status_callback():
                     mapped_data['forwarded_from'] = update_data['ForwardedFrom']
                 
                 response = service.supabase.table("twilio_call").update(mapped_data).eq("id", record_id).execute()
-                if getattr(response, 'data', None):
-        
-                else:
+                if not getattr(response, 'data', None):
                     logger.warning(f"Update twilio_call {record_id} returned no data")
             else:
                 logger.warning(f"No update data prepared for twilio_call record {record_id}")
