@@ -1054,6 +1054,100 @@ def check_business_hours():
         logger.error(f"Error in business hours check: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@vapi_bp.route('/save-live-call-transcript', methods=['POST'])
+def save_live_call_transcript():
+    """Save live call transcript from VAPI payload"""
+    try:
+        # Log the full payload for debugging
+        logger.info(f"Save-live-call-transcript request received - Full payload: {request.get_json()}")
+        
+        data = request.get_json()
+        
+        if not data:
+            logger.error("No JSON data received for save-live-call-transcript")
+            return jsonify({'error': 'No JSON data received'}), 400
+        
+        # Extract vapi_webhook_event_id from variables
+        variables = data.get('variables', {})
+        vapi_webhook_event_id = variables.get('vapi_webhook_event_id')
+        
+        if not vapi_webhook_event_id:
+            logger.error("No vapi_webhook_event_id found in variables")
+            return jsonify({'error': 'vapi_webhook_event_id is required in variables'}), 400
+        
+        logger.info(f"Processing transcript for vapi_webhook_event_id: {vapi_webhook_event_id}")
+        
+        # Extract messagesOpenAIFormatted from payload
+        messages = data.get('message', {}).get('artifact', {}).get('messagesOpenAIFormatted', [])
+        
+        if not messages:
+            logger.warning("No messagesOpenAIFormatted found in payload")
+            return jsonify({'error': 'No messages found in payload'}), 400
+        
+        # Build transcript from messages
+        def to_plain_text_content(content):
+            if isinstance(content, str):
+                return content.strip() or None
+            if isinstance(content, list):
+                texts = []
+                for item in content:
+                    if isinstance(item, dict) and 'text' in item:
+                        text = item.get('text')
+                        if text:
+                            texts.append(text)
+                return ' '.join(texts).strip() or None
+            return None
+        
+        lines = []
+        for msg in messages:
+            # Skip anything with tool_calls
+            if msg.get('tool_calls') and len(msg.get('tool_calls', [])) > 0:
+                continue
+            
+            # Only assistant or user messages
+            if msg.get('role') in ['assistant', 'user']:
+                text = to_plain_text_content(msg.get('content'))
+                if text:
+                    lines.append(f"{msg['role']}: {text}")
+        
+        # Create transcript string
+        transcript = '\n'.join(lines)
+        
+        if not transcript:
+            logger.warning("No transcript content generated")
+            return jsonify({'error': 'No transcript content found'}), 400
+        
+        logger.info(f"Generated transcript with {len(lines)} lines for vapi_webhook_event_id: {vapi_webhook_event_id}")
+        
+        # Save transcript to database
+        try:
+            update_response = vapi_service.supabase\
+                .table('vapi_webhook_event')\
+                .update({'live_call_transcript': transcript})\
+                .eq('id', vapi_webhook_event_id)\
+                .execute()
+            
+            if not update_response.data:
+                logger.error(f"No vapi_webhook_event record found for id: {vapi_webhook_event_id}")
+                return jsonify({'error': 'vapi_webhook_event record not found'}), 404
+            
+            logger.info(f"Successfully saved transcript for vapi_webhook_event_id: {vapi_webhook_event_id}")
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Transcript saved successfully',
+                'vapi_webhook_event_id': vapi_webhook_event_id,
+                'transcript_lines': len(lines)
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Error saving transcript to database: {e}")
+            return jsonify({'error': 'Database update failed'}), 500
+        
+    except Exception as e:
+        logger.error(f"Error in save-live-call-transcript: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
 @vapi_bp.route('/log-payload', methods=['POST'])
 def log_payload():
     """Log the full payload received in the request"""
