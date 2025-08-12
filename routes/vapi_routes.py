@@ -958,11 +958,11 @@ def conference_update():
                             .update({'conference_status': 'agent_joined'})\
                             .eq('call_sid', orig_call_sid).execute()
                         
-                                        # Update agent call record
-                vapi_service.supabase.table('twilio_call')\
-                    .update({'conference_status': 'agent_joined'})\
-                    .eq('parent_id', original_call_id)\
-                    .eq('call_type', 'conference').execute()
+                        # Update agent call record
+                        vapi_service.supabase.table('twilio_call')\
+                            .update({'conference_status': 'agent_joined'})\
+                            .eq('parent_id', original_call_id)\
+                            .eq('call_type', 'conference').execute()
                         
                         logger.info(f"Updated conference_status to 'agent_joined' for call_sid: {orig_call_sid} and agent call")
                     except Exception as e:
