@@ -28,6 +28,11 @@ def setup_logger(name: str, level: str = None) -> logging.Logger:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     
+    # Reduce verbosity of external libraries
+    logging.getLogger('twilio.http_client').setLevel(logging.WARNING)
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    
     # Create formatter
     formatter = logging.Formatter(Config.LOG_FORMAT)
     console_handler.setFormatter(formatter)
@@ -61,5 +66,10 @@ def get_logger(name: str) -> logging.Logger:
         formatter = logging.Formatter(Config.LOG_FORMAT)
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
+        
+        # Reduce verbosity of external libraries
+        logging.getLogger('twilio.http_client').setLevel(logging.WARNING)
+        logging.getLogger('httpx').setLevel(logging.WARNING)
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
     
     return logging.getLogger(name) 
