@@ -278,13 +278,7 @@ def vapi_debug():
 def get_client_dynamic_variables():
     """Get dynamic variables for a client based on phone number"""
     try:
-        # Log the full payload for debugging
-        logger.info(f"Get-client-dynamic-variables request received - Full payload: {request.get_json()}")
-        
         data = request.get_json()
-        
-        # Log the full payload for debugging
-        logger.info(f"VAPI get-client-dynamic-variables - Full payload: {data}")
         
         if not data:
             logger.warning("No JSON data received - checking if it's a form request")
@@ -309,8 +303,6 @@ def get_client_dynamic_variables():
             logger.error("No time_api_request found in request data")
             return jsonify({'error': 'No time_api_request provided'}), 400
         
-        logger.info(f"Processing request for caller: {caller_number}, time: {time_api_request}")
-        
         # Transform time format from "Aug 5, 2025, 8:12 AM UTC" to ISO format
         try:
             from datetime import datetime
@@ -323,15 +315,11 @@ def get_client_dynamic_variables():
             # Format as ISO string
             iso_time = utc_time.isoformat()
             
-            logger.info(f"Transformed time: {time_api_request} -> {iso_time}")
-            
         except Exception as e:
             logger.error(f"Error parsing time format: {e}")
             return jsonify({'error': f'Invalid time format: {time_api_request}'}), 400
         
         # Find matching vapi_webhook_event record with time window
-        logger.info(f"Searching for vapi_webhook_event with from_number: {caller_number}")
-        
         from datetime import timedelta
         
         # Build ISO bounds (two minutes either side of utc_time)
@@ -353,15 +341,12 @@ def get_client_dynamic_variables():
             return jsonify({'error': 'No matching vapi_webhook_event found'}), 404
         
         event = resp.data[0]
-        logger.info(f"Found matching event with transferred_time: {event.get('transferred_time')}")
         
         # Extract client_id from the matched record
         client_id = event.get('client_id')
         if not client_id:
             logger.error(f"No client_id in vapi_webhook_event record")
             return jsonify({'error': 'No client linked to matched record'}), 500
-        
-        logger.info(f"Found client_id: {client_id}")
         
         # Get client's twilio_number from twilio_number table
         num_resp = vapi_service.supabase\
@@ -376,7 +361,6 @@ def get_client_dynamic_variables():
             return jsonify({'error': 'No twilio_number found for client'}), 500
         
         client_twilio_number = num_resp.data[0]['twilio_number']
-        logger.info(f"Found client twilio_number: {client_twilio_number}")
         
         # Get dynamic variables from cache using client_twilio_number
         from services.webhook_service import webhook_service
@@ -511,7 +495,6 @@ def vapi_new_incoming_call_event():
                     caller_record = vapi_service._find_caller_by_phone_number(from_number)
                     if caller_record:
                         payload['caller_id'] = caller_record['id']
-                        logger.info(f"Adding caller_id: {caller_record['id']} for {from_number}")
                 except Exception as link_error:
                     logger.error(f"Error finding caller for linking: {link_error}")
             
@@ -522,11 +505,8 @@ def vapi_new_incoming_call_event():
                     workflow_record = vapi_service._find_vapi_workflow_by_workflow_id(workflow_id)
                     if workflow_record:
                         payload['vapi_workflow_id'] = workflow_record['id']
-                        logger.info(f"Adding vapi_workflow_id: {workflow_record['id']} for workflow_id: {workflow_id}")
                 except Exception as link_error:
                     logger.error(f"Error finding VAPI workflow for linking: {link_error}")
-            
-            logger.info(f"VAPI preparing payload: {payload}")
             
             # Search for existing records that match our criteria
             started_at = call_data.get('startedAt', '')
@@ -535,7 +515,6 @@ def vapi_new_incoming_call_event():
                 try:
                     # Convert started_at to datetime for comparison
                     started_at_dt = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
-                    logger.info(f"VAPI started_at datetime: {started_at_dt}")
                     
                     # Build ISO bounds (two minutes either side of started_at_dt)
                     lower = (started_at_dt - timedelta(minutes=2)).isoformat()

@@ -55,10 +55,7 @@ class IVRService:
             Dictionary containing IVR configuration
         """
         try:
-            logger.info(f"Looking up IVR configuration for Twilio number: {twilio_number}")
-            
             # Supabase lookup
-            logger.info(f"Performing Supabase lookup for IVR config: {twilio_number}")
             
             # Step 1: Query twilio_number table to get client_ivr_language_id
             twilio_number_response = self.supabase.table('twilio_number').select('*').eq('twilio_number', twilio_number).execute()
@@ -103,8 +100,6 @@ class IVRService:
             
             # Check if IVR setup is enabled
             if config['ivr_setup']:
-                logger.info(f"IVR setup enabled for number {twilio_number}, processing multiple language options")
-                
                 # Step 3: Query client_ivr_language_configuration_language join table
                 language_options_response = self.supabase.table('client_ivr_language_configuration_language').select('*, language(*)').eq('client_ivr_language_configuration_id', client_ivr_language_id).order('order', desc=False).execute()
                 
@@ -120,18 +115,13 @@ class IVRService:
                         }
                         
                         config['options'].append(option_config)
-                
-                logger.info(f"Found IVR configuration with {len(config['options'])} options for number {twilio_number}")
             else:
-                logger.info(f"IVR setup disabled for number {twilio_number}, using single language configuration")
-                
                 # For single language setup, get the first language from the join table
                 language_options_response = self.supabase.table('client_ivr_language_configuration_language').select('*, language(*)').eq('client_ivr_language_configuration_id', client_ivr_language_id).limit(1).execute()
                 
                 if language_options_response.data:
                     language_data = language_options_response.data[0].get('language', {})
                     config['language_1_id'] = language_data.get('id')
-                    logger.info(f"Single language configuration found with language_1_id: {config['language_1_id']}")
                 else:
                     logger.error(f"No language configured for single language setup: {twilio_number}")
                     return None
@@ -153,10 +143,7 @@ class IVRService:
             The transfer number or None if not found
         """
         try:
-            logger.info(f"Getting transfer number for language_id: {language_id}")
-            
             # Supabase lookup
-            logger.info(f"Performing Supabase lookup for transfer number: {language_id}")
             
             # Step 1: Query vapi_workflow table to get the workflow for this language
             vapi_workflow_response = self.supabase.table('vapi_workflow').select('*').eq('language_id', language_id).execute()
@@ -179,7 +166,7 @@ class IVRService:
             twilio_number_record = twilio_number_response.data[0]
             transfer_number = twilio_number_record.get('twilio_number')
             
-            logger.info(f"Found transfer number: {transfer_number} for language_id: {language_id} via vapi_workflow: {vapi_workflow_id}")
+
             
             return transfer_number
             
@@ -200,7 +187,6 @@ class IVRService:
             The caller record ID
         """
         try:
-            logger.info(f"Looking for caller: {phone_number}")
             
             # Step 1: Check if a caller exists with the same phone number
             caller_response = self.supabase.table('caller').select('*').eq('phone_number', phone_number).limit(1).execute()
@@ -668,8 +654,7 @@ def status_callback():
     """Handle Twilio status callbacks and update existing twilio_call records"""
     try:
         # Log the full payload that Twilio sends us
-        logger.info("Twilio status callback received - Full payload:")
-        logger.info(dict(request.form))
+        # Status callback received
         
         # Extract CallSid
         call_sid = request.form.get('CallSid')
@@ -683,18 +668,15 @@ def status_callback():
         
         # Only handle "completed" status
         if call_status != "completed":
-            logger.info(f"Received status '{call_status}' - no action needed")
             return '', 200
         
         # Initialize Twilio client and fetch call details
         from twilio.rest import Client
         client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
         
-        logger.info(f"Fetching call details from Twilio for CallSid: {call_sid}")
         call_details = client.calls(call_sid).fetch()
         
         # Look up the CallSid in our twilio_call table
-        logger.info(f"Searching for CallSid {call_sid} in twilio_call table")
         service = get_ivr_service()
         twilio_call_response = service.supabase.table("twilio_call").select("*").eq("call_sid", call_sid).execute()
         
@@ -713,7 +695,6 @@ def status_callback():
         from_number = None
         # Get From field from webhook payload (most reliable source)
         from_number = request.form.get('From')
-        logger.info(f"Got From from webhook payload: {from_number}")
         
         if from_number:
             update_data['From'] = from_number
@@ -737,12 +718,8 @@ def status_callback():
         
         # Branch 1: Found matching record
         if twilio_call_match:
-            logger.info(f"Branch 1: Found twilio_call record for CallSid: {call_sid}")
-            
             # Add 15-second delay for Branch 1
-            logger.info(f"Branch 1: Starting 15-second delay before processing...")
             time.sleep(15)
-            logger.info(f"Branch 1: 15-second delay completed, continuing with processing...")
             
             record = twilio_call_match[0]
             record_id = record['id']
