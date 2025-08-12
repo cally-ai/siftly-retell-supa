@@ -414,11 +414,11 @@ def get_client_dynamic_variables():
         if call_sid:
             response_data["call_sid"] = call_sid
         
-        # Add vapi_workflow_id if found in the event
-        vapi_workflow_id = event.get('vapi_workflow_id')
-        if vapi_workflow_id:
-            response_data["vapi_workflow_id"] = vapi_workflow_id
-            logger.info(f"Added vapi_workflow_id: {vapi_workflow_id} to response")
+        # Add vapi_webhook_event_id (the ID of the event record itself)
+        vapi_webhook_event_id = event.get('id')
+        if vapi_webhook_event_id:
+            response_data["vapi_webhook_event_id"] = vapi_webhook_event_id
+            logger.info(f"Added vapi_webhook_event_id: {vapi_webhook_event_id} to response")
         
         logger.info(f"Returning call_id: {call_id} and {len(dynamic_variables)} dynamic variables")
         logger.info(f"Response payload: {response_data}")
