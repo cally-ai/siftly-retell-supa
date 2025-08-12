@@ -737,7 +737,7 @@ def start_transfer():
             # Create a new twilio_call record for the agent call
             agent_call_data = {
                 'call_sid': agent_call.sid,
-                'call_type': 'transfer',
+                'call_type': 'conference',
                 'parent_id': call_sid,  # Link to the original IVR call
                 'conference_name': conf_name,
                 'from_number': client_twilio_number,
@@ -793,7 +793,7 @@ def start_transfer():
                     vapi_service.supabase.table('twilio_call')\
                         .update({'conference_status': 'timeout_failed'})\
                         .eq('parent_id', call_sid)\
-                        .eq('call_type', 'transfer').execute()
+                        .eq('call_type', 'conference').execute()
 
                     # end agent if known (use DB as source of truth)
                     agent_sid = None
@@ -895,7 +895,7 @@ def conference_update():
                 vapi_service.supabase.table('twilio_call')\
                     .update({'conference_sid': conference_sid})\
                     .eq('parent_id', orig_call_sid)\
-                    .eq('call_type', 'transfer').execute()
+                    .eq('call_type', 'conference').execute()
                 
                 logger.info(f"Saved conference_sid {conference_sid} for call_sid {orig_call_sid} and agent call")
             except Exception as e:
@@ -930,11 +930,11 @@ def conference_update():
                             .update({'conference_status': 'agent_joined'})\
                             .eq('call_sid', orig_call_sid).execute()
                         
-                        # Update agent call record
-                        vapi_service.supabase.table('twilio_call')\
-                            .update({'conference_status': 'agent_joined'})\
-                            .eq('parent_id', orig_call_sid)\
-                            .eq('call_type', 'transfer').execute()
+                                        # Update agent call record
+                vapi_service.supabase.table('twilio_call')\
+                    .update({'conference_status': 'agent_joined'})\
+                    .eq('parent_id', orig_call_sid)\
+                    .eq('call_type', 'conference').execute()
                         
                         logger.info(f"Updated conference_status to 'agent_joined' for call_sid: {orig_call_sid} and agent call")
                     except Exception as e:
@@ -960,7 +960,7 @@ def conference_update():
                 vapi_service.supabase.table('twilio_call')\
                     .update({'conference_status': 'ended'})\
                     .eq('parent_id', orig_call_sid)\
-                    .eq('call_type', 'transfer').execute()
+                    .eq('call_type', 'conference').execute()
                 
                 logger.info(f"Updated conference_status to 'ended' for call_sid: {orig_call_sid} and agent call")
             except Exception as e:
