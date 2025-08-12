@@ -381,7 +381,7 @@ def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: st
         language_id: The language record ID
     """
     try:
-        logger.info(f"Background: Processing caller lookup and Twilio call record for CallSid: {call_sid}")
+
         
         # Find or create caller record (this was blocking the TwiML response)
         service = get_ivr_service()
@@ -392,13 +392,13 @@ def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: st
         )
         
         if caller_id:
-            logger.info(f"Background: Found/created caller record: {caller_id}")
+    
             
             # Update VAPI webhook event with real caller_id
             try:
                 update_success = service.update_vapi_webhook_event_caller(vapi_event_id, caller_id)
                 if update_success:
-                    logger.info(f"Background: Successfully updated VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
+            
                 else:
                     logger.error(f"Background: Failed to update VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
             except Exception as e:
@@ -410,7 +410,7 @@ def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: st
         success = service.create_twilio_call_record(call_sid, vapi_event_id)
         
         if success:
-            logger.info(f"Background: Successfully created Twilio call record for CallSid: {call_sid}")
+    
         else:
             logger.error(f"Background: Failed to create Twilio call record for CallSid: {call_sid}")
             
@@ -791,13 +791,11 @@ def status_callback():
                 logger.warning(f"No update data prepared for twilio_call record {record_id}")
             
             # Now find child calls using ParentCallSid
-            logger.info(f"Branch 1: Searching for child calls with ParentCallSid: {call_sid}")
             child_calls = client.calls.list(parent_call_sid=call_sid, limit=1)
             
             if child_calls:
                 child_call = child_calls[0]
                 child_call_sid = child_call.sid
-                logger.info(f"Branch 1: Found child call SID: {child_call_sid}")
                 
                 # Fetch child call details
                 child_call_details = client.calls(child_call_sid).fetch()
@@ -817,7 +815,7 @@ def status_callback():
                 child_from_number = None
                 # For child calls (transfers), we typically don't have a From field in the API response
                 # as they are outbound calls. We'll skip this for now.
-                logger.info("Child call - From field not available for outbound transfer calls")
+
                 
                 if child_from_number:
                     child_call_data['From'] = child_from_number
@@ -841,9 +839,8 @@ def status_callback():
                 vapi_webhook_event_id = record.get('vapi_webhook_event_id')
                 if vapi_webhook_event_id:
                     child_call_data['vapi_webhook_event'] = [vapi_webhook_event_id]  # Convert to list for compatibility
-                    logger.info(f"Branch 1: Linking child call to same vapi_webhook_event_id: {vapi_webhook_event_id}")
                 
-                logger.info(f"Branch 1: Creating child call record with data: {child_call_data}")
+
                 
                 # Map child call data to Supabase-compatible names
                 mapped_child_data = {}
@@ -879,14 +876,13 @@ def status_callback():
                 child_record = child_response.data[0] if child_response.data else None
                 
                 if child_record:
-                    logger.info(f"Branch 1: Successfully created child call record: {child_record['id']}")
+                    pass
                 else:
                     logger.error(f"Branch 1: Failed to create child call record")
             else:
-                logger.info(f"Branch 1: No child calls found for ParentCallSid: {call_sid}")
+                pass
             
             # Now look for a matching VAPI record to link vapi_webhook_event
-            logger.info(f"Branch 1: Looking for matching VAPI record with same From field and similar EndTime")
             
             # Get the From field and EndTime from our updated record
             from_number = update_data.get('From')
@@ -897,7 +893,7 @@ def status_callback():
                 response = service.supabase.table("twilio_call").select("*").eq("from_number", from_number).execute()
                 matching_records = response.data or []
                 
-                logger.info(f"Branch 1: Found {len(matching_records)} records with same From field: {from_number}")
+
                 
                 # Filter for records with Type = "vapi" and similar EndTime
                 from datetime import datetime
@@ -917,12 +913,9 @@ def status_callback():
                             # Calculate time difference
                             time_diff = abs((new_end_dt - record_end_dt).total_seconds())
                             
-                            logger.info(f"Branch 1: Comparing with record {record['id']}: time_diff={time_diff}s")
-                            
-                            # Check if within 15 seconds
-                            if time_diff <= 15:
-                                matching_vapi_records.append(record)
-                                logger.info(f"Branch 1: Found matching VAPI record {record['id']} (time_diff={time_diff}s)")
+                                                                # Check if within 15 seconds
+                                    if time_diff <= 15:
+                                        matching_vapi_records.append(record)
                             
                         except Exception as e:
                             logger.warning(f"Branch 1: Error parsing EndTime for record {record['id']}: {e}")
@@ -1033,7 +1026,7 @@ def status_callback():
                                         record_id = ivr_vapi_webhook_event[0]
                                         response = service.supabase.table("vapi_webhook_event").update(mapped_vapi_data).eq("id", record_id).execute()
                                         if getattr(response, 'data', None):
-                                            logger.info(f"Branch 1: Successfully updated vapi_webhook_event record with VAPI data")
+                                            pass
                                         else:
                                             logger.warning(f"Update vapi_webhook_event {record_id} returned no data")
                                     else:
@@ -1047,19 +1040,15 @@ def status_callback():
                     else:
                         logger.warning(f"Branch 1: No vapi_webhook_event found in IVR record to copy to VAPI record")
                 else:
-                    logger.info(f"Branch 1: No matching VAPI record found within 15 seconds")
+                    pass
             else:
                 logger.warning(f"Branch 1: Missing From field or EndTime for comparison")
         
         # Branch 2: No matching record found
         else:
-            logger.info(f"Branch 2: No twilio_call record found for CallSid: {call_sid}, creating new record")
-            
             # Create new record with the same fields
             new_call_data = update_data.copy()
             new_call_data['Type'] = 'vapi'  # Set type to vapi for new records
-            
-            logger.info(f"Branch 2: Creating new twilio_call record with data: {new_call_data}")
             
             # Create the new record in Supabase
             if new_call_data:
@@ -1092,10 +1081,7 @@ def status_callback():
                 new_record = response.data[0] if response.data else None
                 
                 if new_record:
-                    logger.info(f"Branch 2: Successfully created new twilio_call record: {new_record['id']}")
-                    
                     # Now look for a matching IVR record to link vapi_webhook_event
-                    logger.info(f"Branch 2: Looking for matching IVR record with same From field and similar EndTime")
                     
                     # Get the From field and EndTime from our new record
                     from_number = new_call_data.get('From')
@@ -1106,7 +1092,7 @@ def status_callback():
                         response = service.supabase.table("twilio_call").select("*").eq("from_number", from_number).execute()
                         matching_records = response.data or []
                         
-                        logger.info(f"Branch 2: Found {len(matching_records)} records with same From field: {from_number}")
+
                         
                         # Filter for records with Type = "ivr" and similar EndTime
                         from datetime import datetime
@@ -1126,12 +1112,9 @@ def status_callback():
                                     # Calculate time difference
                                     time_diff = abs((new_end_dt - record_end_dt).total_seconds())
                                     
-                                    logger.info(f"Branch 2: Comparing with record {record['id']}: time_diff={time_diff}s")
-                                    
                                     # Check if within 15 seconds
                                     if time_diff <= 15:
                                         matching_ivr_records.append(record)
-                                        logger.info(f"Branch 2: Found matching IVR record {record['id']} (time_diff={time_diff}s)")
                                     
                                 except Exception as e:
                                     logger.warning(f"Branch 2: Error parsing EndTime for record {record['id']}: {e}")
@@ -1143,7 +1126,6 @@ def status_callback():
                             vapi_webhook_event_id = matching_ivr_record.get('vapi_webhook_event_id')
                             
                             if vapi_webhook_event_id:
-                                logger.info(f"Branch 2: Linking vapi_webhook_event_id {vapi_webhook_event_id} from IVR record {matching_ivr_record['id']}")
                                 
                                 # Update our new record with the vapi_webhook_event_id link
                                 update_data = {
@@ -1152,13 +1134,13 @@ def status_callback():
                                 
                                 response = service.supabase.table("twilio_call").update(update_data).eq("id", new_record['id']).execute()
                                 if getattr(response, 'data', None):
-                                    logger.info(f"Branch 2: Successfully linked vapi_webhook_event_id to new record {new_record['id']}")
+    
                                 else:
                                     logger.warning(f"Update twilio_call {new_record['id']} with vapi_webhook_event_id returned no data")
                             else:
                                 logger.warning(f"Branch 2: No vapi_webhook_event_id found in matching IVR record {matching_ivr_record['id']}")
                         else:
-                            logger.info(f"Branch 2: No matching IVR record found within 15 seconds")
+                            pass
                     else:
                         logger.warning(f"Branch 2: Missing From field or EndTime for comparison")
                 else:
