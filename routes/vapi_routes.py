@@ -50,7 +50,7 @@ class VAPIWebhookService:
             The vapi_language_code value or None if not found
         """
         try:
-            logger.info(f"Looking up caller language for phone_number_id: {phone_number_id}")
+    
             
             # Single joined query to get language code directly
             resp = self.supabase\
@@ -72,7 +72,7 @@ class VAPIWebhookService:
             vapi_language_code = language_data.get('vapi_language_code')
             
             if vapi_language_code:
-                logger.info(f"Found caller language: {vapi_language_code} for phone_number_id: {phone_number_id}")
+        
                 return vapi_language_code
             else:
                 logger.warning(f"No vapi_language_code found in language record for phone_number_id: {phone_number_id}")
@@ -93,7 +93,7 @@ class VAPIWebhookService:
             Extracted call data dictionary or None if failed
         """
         try:
-            logger.info(f"Retrieving VAPI call data for call_id: {call_id}")
+    
             
             if not Config.VAPI_API_KEY:
                 logger.error("VAPI_API_KEY not configured")
@@ -139,7 +139,7 @@ class VAPIWebhookService:
                 'analysis_success_evaluation': call_info.get('analysis', {}).get('successEvaluation', '')
             }
             
-            logger.info(f"Successfully extracted VAPI call data for call_id: {call_id}")
+    
             return extracted_data
             
         except Exception as e:
@@ -379,7 +379,7 @@ def get_client_dynamic_variables():
             caller_language = vapi_service._get_caller_language_from_phone_id(phone_number_id)
             if caller_language:
                 dynamic_variables["caller_language"] = caller_language
-                logger.info(f"Added caller_language dynamic variable: {caller_language}")
+        
             else:
                 logger.warning(f"Could not determine caller_language for phone_number_id: {phone_number_id}")
         
@@ -399,7 +399,7 @@ def get_client_dynamic_variables():
             
             if twilio_call_resp.data:
                 call_sid = twilio_call_resp.data[0].get('call_sid')
-                logger.info(f"Found call_sid: {call_sid} from twilio_call record")
+        
             else:
                 logger.warning(f"No twilio_call record found with call_type 'ivr' for vapi_webhook_event_id: {event.get('id')}")
         
@@ -418,10 +418,10 @@ def get_client_dynamic_variables():
         vapi_webhook_event_id = event.get('id')
         if vapi_webhook_event_id:
             response_data["vapi_webhook_event_id"] = vapi_webhook_event_id
-            logger.info(f"Added vapi_webhook_event_id: {vapi_webhook_event_id} to response")
+    
         
-        logger.info(f"Returning call_id: {call_id} and {len(dynamic_variables)} dynamic variables")
-        logger.info(f"Response payload: {response_data}")
+
+
         
         return jsonify(response_data), 200
             
@@ -535,16 +535,16 @@ def vapi_new_incoming_call_event():
                     existing = resp.data[0] if resp.data else None
                     
                     if existing:
-                        logger.info(f"VAPI updating existing record: {existing['id']}")
+                
                         # Update the existing record
                         result = vapi_service.supabase\
                             .table('vapi_webhook_event')\
                             .update(payload)\
                             .eq('id', existing['id'])\
                             .execute()
-                        logger.info(f"VAPI updated existing record: {existing['id']}")
+                
                     else:
-                        logger.info(f"VAPI no matching records found for {from_number}, creating new record")
+                
                         # Create new record
                         result = vapi_service.supabase\
                             .table('vapi_webhook_event')\
@@ -567,10 +567,10 @@ def vapi_new_incoming_call_event():
                     .table('vapi_webhook_event')\
                     .insert(payload)\
                     .execute()
-                logger.info(f"VAPI created new record")
+                pass
             
             if result and result.data:
-                logger.info(f"Successfully saved VAPI webhook event record")
+                pass
             else:
                 logger.warning("Failed to save detailed call data to Supabase")
                 

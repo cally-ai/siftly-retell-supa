@@ -427,7 +427,7 @@ def ivr_handler():
         to_number = request.form.get('To')
         call_sid = request.form.get('CallSid')
         
-        logger.info(f"IVR call received - From: {from_number}, To: {to_number}, CallSid: {call_sid}")
+
         
         # Get IVR configuration
         service = get_ivr_service()
@@ -440,11 +440,8 @@ def ivr_handler():
             response.say("Sorry, this number is not configured for IVR.", voice='alice')
             return Response(str(response), mimetype='text/xml')
         
-        logger.info(f"IVR configuration found - Client: {ivr_config['client_id']}, IVR Setup: {ivr_config['ivr_setup']}")
-        
         # Check if IVR setup is enabled
         if ivr_config['ivr_setup']:
-            logger.info(f"IVR setup enabled, generating language selection menu")
             
             # Build TwiML response for language selection
             response = VoiceResponse()
@@ -452,7 +449,6 @@ def ivr_handler():
             
             # Check if we have an audio URL for the IVR menu
             if ivr_config.get('audio_url_ivr'):
-                logger.info(f"Using audio URL for IVR menu: {ivr_config['audio_url_ivr']}")
                 # Use the audio URL directly
                 audio_url = ivr_config['audio_url_ivr']
                 
@@ -467,11 +463,9 @@ def ivr_handler():
             response.append(gather)
             response.say("No selection made. Goodbye.", voice='alice')
             
-            logger.info(f"Generated IVR TwiML with {len(ivr_config['options'])} options for caller {from_number}")
             return Response(str(response), mimetype='text/xml')
             
         else:
-            logger.info(f"IVR setup disabled, directly transferring call to single language configuration")
             
             # For single language setup, directly transfer the call
             language_1_id = ivr_config.get('language_1_id')
@@ -490,7 +484,7 @@ def ivr_handler():
                 response.say("Sorry, transfer number not configured.", voice='alice')
                 return Response(str(response), mimetype='text/xml')
             
-            logger.info(f"Single language transfer - From: {from_number}, To: {transfer_number}, Language: {language_1_id}")
+
             
             # Find or create caller record
             caller_id = ivr_service.find_or_create_caller(from_number, ivr_config['client_id'], language_1_id)
@@ -529,7 +523,7 @@ def ivr_handler():
                 caller_id=from_number  # Preserve original caller ID
             )
             
-            logger.info(f"Successfully transferred call from {from_number} to {transfer_number} for single language setup")
+
             return Response(str(response), mimetype='text/xml')
         
     except Exception as e:
@@ -549,11 +543,7 @@ def handle_selection():
         call_sid = request.form.get('CallSid')
         
         # Debug: Log all Twilio form data to see available fields
-        logger.info(f"IVR selection received - From: {from_number}, To: {to_number}, Digits: {digits}")
-        logger.info(f"Full Twilio form data: {dict(request.form)}")
-        logger.info(f"StartTime from Twilio: {request.form.get('StartTime')}")
-        logger.info(f"CallStartTime from Twilio: {request.form.get('CallStartTime')}")
-        logger.info(f"StartTime from Twilio: {request.form.get('start_time')}")
+
         
         # Get IVR configuration again
         service = get_ivr_service()
@@ -578,7 +568,7 @@ def handle_selection():
             response.say("Invalid selection. Please try again.", voice='alice')
             return Response(str(response), mimetype='text/xml')
         
-        logger.info(f"Caller {from_number} selected option {digits}")
+
         
         # Get transfer number
         transfer_number = service.get_transfer_number(selected_option['language_id'])
@@ -589,7 +579,7 @@ def handle_selection():
             response.say("Sorry, transfer number not configured.", voice='alice')
             return Response(str(response), mimetype='text/xml')
         
-        logger.info(f"Transfer number found: {transfer_number} for language {selected_option['language_id']}")
+
         
         # Create VAPI webhook event record (synchronous - must complete before TwiML response)
         # Create without caller field initially, will be updated in background
@@ -605,7 +595,7 @@ def handle_selection():
             response.say("Sorry, an error occurred. Please try again.", voice='alice')
             return Response(str(response), mimetype='text/xml')
         
-        logger.info(f"VAPI webhook event created for caller {from_number}: {vapi_event_id}")
+
         
         # Create Twilio call record and update caller in background (after TwiML response)
         background_thread = threading.Thread(
@@ -620,7 +610,7 @@ def handle_selection():
         
         # Play the reply message if configured
         if selected_option.get('audio_reply'):
-            logger.info(f"Playing audio reply URL: {selected_option['audio_reply']}")
+    
             # Use the audio URL directly
             audio_reply_url = selected_option['audio_reply']
             
@@ -640,7 +630,7 @@ def handle_selection():
         )
         dial.number(transfer_number)
         
-        logger.info(f"Transferring call from {from_number} to {transfer_number} with caller ID preserved")
+
         return Response(str(response), mimetype='text/xml')
         
     except Exception as e:
@@ -660,7 +650,7 @@ def status_callback():
         call_sid = request.form.get('CallSid')
         call_status = request.form.get('CallStatus')
         
-        logger.info(f"Extracted CallSid: {call_sid}, Status: {call_status}")
+
         
         if not call_sid:
             logger.warning("No CallSid provided in status callback")
@@ -765,9 +755,9 @@ def status_callback():
                 else:
                     logger.error(f"Branch 1: Failed to create vapi_webhook_event record")
             else:
-                logger.info(f"Branch 1: IVR record already has vapi_webhook_event: {existing_vapi_webhook_event}")
+                pass
             
-            logger.info(f"Updating existing twilio_call record {record_id} with data: {update_data}")
+            # Update the record
             
             # Update the existing record in Supabase
             if update_data:
@@ -796,7 +786,7 @@ def status_callback():
                 
                 response = service.supabase.table("twilio_call").update(mapped_data).eq("id", record_id).execute()
                 if getattr(response, 'data', None):
-                    logger.info(f"Successfully updated twilio_call record {record_id} with Twilio call completion data")
+        
                 else:
                     logger.warning(f"Update twilio_call {record_id} returned no data")
             else:

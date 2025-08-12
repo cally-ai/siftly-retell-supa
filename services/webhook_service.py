@@ -56,11 +56,11 @@ class WebhookService:
             if not client_id:
                 raise ValueError("client_id not found in request")
             
-            logger.info(f"Processing business hours check for client_id: {client_id}")
+    
             
             # Step 2: Get the current server time
             current_utc_time = datetime.utcnow()
-            logger.info(f"Current UTC time: {current_utc_time}")
+    
             
             # Step 3: Look up the client in Supabase
             client_data = self._get_client_business_hours(client_id)
@@ -88,7 +88,7 @@ class WebhookService:
                 # Handle timezone if it's a list (take first item)
                 if isinstance(timezone_str, list):
                     timezone_str = timezone_str[0] if timezone_str else None
-                    logger.info(f"Extracted timezone from list: {timezone_str}")
+    
                 
                 if not timezone_str:
                     logger.warning(f"No valid timezone found for client_id: {client_id}")
@@ -96,13 +96,13 @@ class WebhookService:
                 
                 client_tz = pytz.timezone(timezone_str)
                 client_local_time = current_utc_time.replace(tzinfo=pytz.UTC).astimezone(client_tz)
-                logger.info(f"Client local time ({timezone_str}): {client_local_time}")
+
                 
                 # Get current weekday (lowercase)
                 current_weekday = client_local_time.strftime('%A').lower()
                 current_time_str = client_local_time.strftime('%H:%M')
                 
-                logger.info(f"Current weekday: {current_weekday}, time: {current_time_str}")
+
                 
                 # Step 5: Check if within business hours
                 within_hours = self._check_business_hours(
@@ -110,7 +110,7 @@ class WebhookService:
                 )
                 
                 result = {"within_business_hours": "true" if within_hours else "false"}
-                logger.info(f"Business hours check result: {result}")
+
                 return result
                 
             except pytz.exceptions.UnknownTimeZoneError:
