@@ -716,8 +716,9 @@ def start_transfer():
             agent_call = client.calls.create(
                 to=client_transfer_number,
                 from_=client_twilio_number,  # Use client-specific Twilio number
-                twiml=str(response)
-                # Removed call status callback - relying on conference events only
+                twiml=str(response),
+                status_callback=f"{Config.APP_BASE_URL}/vapi/agent-call-status",
+                status_callback_event="completed"
             )
             
             logger.info(f"Initiated agent call {agent_call.sid} to {client_transfer_number}")
@@ -1166,6 +1167,98 @@ def save_live_call_transcript():
     except Exception as e:
         logger.error(f"Error in save-live-call-transcript: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+@vapi_bp.route('/agent-call-status', methods=['POST'])
+def agent_call_status():
+    """Handle agent call status callbacks to detect failures"""
+    try:
+        # Validate Twilio signature in production
+        if Config.FLASK_ENV == 'production' and not _is_valid_twilio_request(request):
+            logger.warning("Invalid Twilio signature")
+            return '', 403
+        
+        # Log the full payload for debugging
+        logger.info(f"Agent call status callback received - Full payload: {dict(request.form)}")
+        
+        # Extract webhook data
+        call_sid = request.form.get('CallSid')
+        call_status = request.form.get('CallStatus')
+        
+        logger.info(f"Agent call status: {call_status} for call_sid: {call_sid}")
+        
+        # Check if this is an agent call (conference type)
+        agent_call_response = vapi_service.supabase.table('twilio_call')\
+            .select('parent_id, conference_name')\
+            .eq('call_sid', call_sid)\
+            .eq('call_type', 'conference')\
+            .execute()
+        
+        if not agent_call_response.data:
+            logger.info(f"Call {call_sid} is not an agent call, ignoring")
+            return '', 200
+        
+        agent_call_record = agent_call_response.data[0]
+        parent_id = agent_call_record['parent_id']
+        conference_name = agent_call_record['conference_name']
+        
+        # Check if agent call failed (busy, failed, no-answer, etc.)
+        failed_statuses = ['busy', 'failed', 'no-answer', 'canceled']
+        
+        if call_status in failed_statuses:
+            logger.info(f"Agent call failed with status: {call_status}")
+            
+            # Get the original caller's call_sid
+            original_call_response = vapi_service.supabase.table('twilio_call')\
+                .select('call_sid')\
+                .eq('id', parent_id)\
+                .execute()
+            
+            if not original_call_response.data:
+                logger.error(f"Could not find original call for parent_id: {parent_id}")
+                return '', 404
+            
+            caller_call_sid = original_call_response.data[0]['call_sid']
+            
+            # Update database status
+            try:
+                # Update agent call record
+                vapi_service.supabase.table('twilio_call')\
+                    .update({'conference_status': f'agent_failed_{call_status}'})\
+                    .eq('call_sid', call_sid).execute()
+                
+                # Update original IVR call record
+                vapi_service.supabase.table('twilio_call')\
+                    .update({'conference_status': f'agent_failed_{call_status}'})\
+                    .eq('id', parent_id).execute()
+                
+                logger.info(f"Updated conference status to agent_failed_{call_status}")
+            except Exception as e:
+                logger.error(f"Error updating database status: {e}")
+            
+            # Return caller back to VAPI workflow
+            try:
+                from twilio.rest import Client
+                client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
+                
+                # Update the caller's call to return to VAPI
+                caller_update = client.calls(caller_call_sid).update(
+                    url=f"{Config.APP_BASE_URL}/ivr/handle-selection",
+                    method="POST"
+                )
+                
+                logger.info(f"Returned caller {caller_call_sid} back to VAPI workflow")
+                
+                # Clean up transfer context
+                TRANSFER_CTX.pop(conference_name, None)
+                
+            except Exception as e:
+                logger.error(f"Error returning caller to VAPI: {e}")
+        
+        return '', 200
+        
+    except Exception as e:
+        logger.error(f"Error in agent-call-status: {e}")
+        return '', 500
 
 @vapi_bp.route('/log-payload', methods=['POST'])
 def log_payload():
