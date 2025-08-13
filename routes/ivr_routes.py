@@ -397,9 +397,7 @@ def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: st
             # Update VAPI webhook event with real caller_id
             try:
                 update_success = service.update_vapi_webhook_event_caller(vapi_event_id, caller_id)
-                if update_success:
-            
-                else:
+                if not update_success:
                     logger.error(f"Background: Failed to update VAPI webhook event {vapi_event_id} with caller_id {caller_id}")
             except Exception as e:
                 logger.error(f"Background: Error updating VAPI webhook event caller: {e}")
@@ -409,9 +407,7 @@ def run_post_transfer_updates(from_number: str, vapi_event_id: str, call_sid: st
         # Create Twilio call record in background
         success = service.create_twilio_call_record(call_sid, vapi_event_id)
         
-        if success:
-    
-        else:
+        if not success:
             logger.error(f"Background: Failed to create Twilio call record for CallSid: {call_sid}")
             
     except Exception as e:
