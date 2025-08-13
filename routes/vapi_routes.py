@@ -1555,32 +1555,53 @@ def classify_intent_route():
     """
     Input JSON:
     {
-      "client_id": "<uuid>",
-      "conversation": "The conversation history",
-      "vapi_webhook_event_id": "<uuid string>"
+      "message": {
+        "toolCallList": [
+          {
+            "id": "toolu_01DTPAzUm5Gk3zxrpJ969oMF",
+            "name": "process_conversation",
+            "arguments": {
+              "conversation": "User: Hello\nAssistant: Hi there\n...",
+              "client_id": "<uuid>",
+              "vapi_webhook_event_id": "<uuid string>"
+            }
+          }
+        ]
+      }
     }
     Returns:
-    { "results": [ { "toolCallId": "call_id", "result": "<JSON string>" } ] }
+    { "results": [ { "toolCallId": "toolu_01DTPAzUm5Gk3zxrpJ969oMF", "result": "<JSON string>" } ] }
     """
     try:
         body = request.get_json(silent=True) or {}
-        client_id = (body.get("client_id") or "").strip()
-        conversation = (body.get("conversation") or "").strip()
-        vapi_event_id = (body.get("vapi_webhook_event_id") or "").strip()
+        
+        # Extract toolCallId from the request
+        tool_call_list = body.get('message', {}).get('toolCallList', [])
+        if not tool_call_list:
+            return jsonify({"results": [{"toolCallId": "unknown", "result": "No toolCallList found in request"}]}), 400
+        
+        tool_call = tool_call_list[0]
+        tool_call_id = tool_call.get('id', 'unknown')
+        arguments = tool_call.get('arguments', {})
+        
+        # Extract arguments
+        client_id = (arguments.get("client_id") or "").strip()
+        conversation = (arguments.get("conversation") or "").strip()
+        vapi_event_id = (arguments.get("vapi_webhook_event_id") or "").strip()
 
         # --- validate required fields ---
-        missing = [k for k in ["client_id", "conversation", "vapi_webhook_event_id"] if not body.get(k)]
+        missing = [k for k in ["client_id", "conversation", "vapi_webhook_event_id"] if not arguments.get(k)]
         if missing:
-            return jsonify({"results": [{"toolCallId": "call_id", "result": f"Missing required fields: {', '.join(missing)}"}]}), 400
+            return jsonify({"results": [{"toolCallId": tool_call_id, "result": f"Missing required fields: {', '.join(missing)}"}]}), 400
         try:
             _ = uuidlib.UUID(client_id)
         except Exception:
-            return jsonify({"results": [{"toolCallId": "call_id", "result": "client_id must be a UUID"}]}), 400
+            return jsonify({"results": [{"toolCallId": tool_call_id, "result": "client_id must be a UUID"}]}), 400
 
         # --- extract last utterance from conversation ---
         user_text = _extract_last_user_text(conversation)
         if not user_text:
-            return jsonify({"results": [{"toolCallId": "call_id", "result": "Conversation missing user content"}]}), 400
+            return jsonify({"results": [{"toolCallId": tool_call_id, "result": "Conversation missing user content"}]}), 400
 
         # --- detect + translate to English (for retrieval/classification) ---
         detected_lang = _detect_language_simple(user_text)
@@ -1592,7 +1613,7 @@ def classify_intent_route():
         # --- embed + shortlist ---
         vec, embed_ms, emb_model = embed_english(utter_en)
         if not vec:
-            return jsonify({"results": [{"toolCallId": "call_id", "result": "Failed to generate embedding"}]}), 500
+            return jsonify({"results": [{"toolCallId": tool_call_id, "result": "Failed to generate embedding"}]}), 500
         
         top = match_topk(client_id, vec, TOP_K)
         intent_ids = [t["intent_id"] for t in top]
@@ -1663,7 +1684,7 @@ def classify_intent_route():
         return jsonify({
             "results": [
                 {
-                    "toolCallId": "call_id",
+                    "toolCallId": tool_call_id,
                     "result": _json_string(result_obj)
                 }
             ]
@@ -1674,7 +1695,7 @@ def classify_intent_route():
         return jsonify({
             "results": [
                 {
-                    "toolCallId": "call_id",
+                    "toolCallId": tool_call_id,
                     "result": f"Error processing intent classification: {str(e)}"
                 }
             ]
