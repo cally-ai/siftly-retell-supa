@@ -151,35 +151,37 @@ def _resolve_call_id(call_id: Optional[str], vapi_webhook_event_id: Optional[str
 
 # --- Language normalization helpers ---
 DG_LANG_MAP = {
-    "en": "en", "en-US": "en", "en-GB": "en",
-    "nl": "nl", "fr": "fr", "de": "de", "es": "es", "it": "it",
-    "pt": "pt", "pt-BR": "pt",
+    # english
+    "en": "en", "en-us": "en", "en-gb": "en", "en-au": "en",
+    # dutch
+    "nl": "nl", "nl-be": "nl",  # <-- explicit support for nl-BE
+    # common EU langs
+    "fr": "fr", "fr-be": "fr", "de": "de", "es": "es", "it": "it",
+    # nordics
     "sv": "sv", "da": "da", "no": "no", "fi": "fi",
-    "pl": "pl", "ro": "ro", "cs": "cs", "sk": "sk", "sl": "sl", "hu": "hu",
-    "el": "el", "tr": "tr", "ru": "ru", "uk": "uk",
+    # others you already see
+    "pt": "pt", "pt-br": "pt", "pl": "pl", "cs": "cs", "sk": "sk",
+    "ro": "ro", "hu": "hu", "tr": "tr", "el": "el",
+    "ru": "ru", "uk": "uk",
     "ar": "ar", "he": "he", "fa": "fa",
-    "hi": "hi", "th": "th", "vi": "vi", "id": "id", "ms": "ms",
+    "hi": "hi", "vi": "vi", "th": "th", "id": "id", "ms": "ms",
     "ja": "ja", "ko": "ko",
-    "zh": "zh", "zh-CN": "zh", "zh-HK": "zh", "zh-TW": "zh"
+    "zh": "zh", "zh-cn": "zh", "zh-hk": "zh", "zh-tw": "zh"
 }
 
 def normalize_target_language(caller_lang: Optional[str]) -> Optional[str]:
     """
-    Convert Deepgram language codes to a language tag for clarifying questions.
-    Return None for English so the model writes the question in English (or not at all).
+    Convert Deepgram language codes (e.g., 'nl-BE') to a simple target
+    language for clarifying questions. Returns None for English.
+    Case-insensitive; falls back to base before hyphen.
     """
     if not caller_lang:
         return None
-    c = caller_lang.strip()
-    if not c:
-        return None
-    # direct map first
+    c = caller_lang.strip().lower()
     mapped = DG_LANG_MAP.get(c)
     if mapped is None:
-        # fallback: take base before hyphen (e.g., 'en-AU' -> 'en')
-        base = c.split("-")[0].lower()
+        base = c.split("-")[0]
         mapped = DG_LANG_MAP.get(base, base)
-    # if English, return None (we don't need a non-English question)
     return None if mapped == "en" else mapped
 
 # --- Route: POST /classify-intent (Vapi tool format) ---
@@ -245,22 +247,22 @@ def classify_intent():
             continue
 
         # 2) Decide language & translate only if not English
-        # Prefer explicit caller_language from Vapi (Deepgram); fallback to simple heuristic if missing.
-        is_english = False
+        # Prefer explicit caller_language from Vapi; else heuristic
         if caller_language:
-            is_english = caller_language == "en" or caller_language.startswith("en-")
+            c_low = caller_language.lower()
+            is_english = (c_low == "en") or c_low.startswith("en-")
         else:
-            # fallback heuristic only if caller_language not provided
             detected_lang = _detect_language_simple(user_text)
-            caller_language = detected_lang  # store something for logging
+            caller_language = detected_lang
             is_english = detected_lang == "en"
 
+        # Translate only when not English
         if is_english:
             utter_en, _translate_ms = user_text, 0
         else:
             utter_en, _translate_ms = translate_to_english(user_text)
 
-        # Language to use for clarifying question (None = English)
+        # Language for clarifying question
         target_lang = normalize_target_language(caller_language)
 
         # 3) Embed + shortlist
@@ -309,7 +311,7 @@ def classify_intent():
                 "completion_tokens": cls.get("completion_tokens"),
                 "router_version": "v1",
                 "utterance": _redact_pii(user_text),
-                "detected_lang": caller_language or None,
+                "detected_lang": (caller_language.lower() or None),
                 "utterance_en": _redact_pii(utter_en)
             }).execute()
         except Exception:
