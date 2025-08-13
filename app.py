@@ -11,7 +11,6 @@ from routes.health_routes import health_bp
 
 from routes.vapi_routes import vapi_bp
 from routes.ivr_routes import ivr_bp
-from routes.classify_intent import classify_bp
 
 # Version check for debugging
 try:
@@ -57,7 +56,6 @@ def create_app(config_name=None):
 
     app.register_blueprint(vapi_bp)
     app.register_blueprint(ivr_bp)
-    app.register_blueprint(classify_bp, url_prefix="")
     
     # Error handlers
     @app.errorhandler(404)
