@@ -1129,9 +1129,7 @@ def status_callback():
                                 }
                                 
                                 response = service.supabase.table("twilio_call").update(update_data).eq("id", new_record['id']).execute()
-                                if getattr(response, 'data', None):
-    
-                                else:
+                                if not getattr(response, 'data', None):
                                     logger.warning(f"Update twilio_call {new_record['id']} with vapi_webhook_event_id returned no data")
                             else:
                                 logger.warning(f"Branch 2: No vapi_webhook_event_id found in matching IVR record {matching_ivr_record['id']}")
