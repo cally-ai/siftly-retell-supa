@@ -909,9 +909,9 @@ def status_callback():
                             # Calculate time difference
                             time_diff = abs((new_end_dt - record_end_dt).total_seconds())
                             
-                                                                # Check if within 15 seconds
-                                    if time_diff <= 15:
-                                        matching_vapi_records.append(record)
+                            # Check if within 15 seconds
+                            if time_diff <= 15:
+                                matching_vapi_records.append(record)
                             
                         except Exception as e:
                             logger.warning(f"Branch 1: Error parsing EndTime for record {record['id']}: {e}")
