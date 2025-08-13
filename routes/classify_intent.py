@@ -149,6 +149,39 @@ def _resolve_call_id(call_id: Optional[str], vapi_webhook_event_id: Optional[str
     ev = (vapi_webhook_event_id or "").strip()
     return f"VAPI:{ev}" if ev else f"auto:{uuidlib.uuid4()}"
 
+# --- Language normalization helpers ---
+DG_LANG_MAP = {
+    "en": "en", "en-US": "en", "en-GB": "en",
+    "nl": "nl", "fr": "fr", "de": "de", "es": "es", "it": "it",
+    "pt": "pt", "pt-BR": "pt",
+    "sv": "sv", "da": "da", "no": "no", "fi": "fi",
+    "pl": "pl", "ro": "ro", "cs": "cs", "sk": "sk", "sl": "sl", "hu": "hu",
+    "el": "el", "tr": "tr", "ru": "ru", "uk": "uk",
+    "ar": "ar", "he": "he", "fa": "fa",
+    "hi": "hi", "th": "th", "vi": "vi", "id": "id", "ms": "ms",
+    "ja": "ja", "ko": "ko",
+    "zh": "zh", "zh-CN": "zh", "zh-HK": "zh", "zh-TW": "zh"
+}
+
+def normalize_target_language(caller_lang: Optional[str]) -> Optional[str]:
+    """
+    Convert Deepgram language codes to a language tag for clarifying questions.
+    Return None for English so the model writes the question in English (or not at all).
+    """
+    if not caller_lang:
+        return None
+    c = caller_lang.strip()
+    if not c:
+        return None
+    # direct map first
+    mapped = DG_LANG_MAP.get(c)
+    if mapped is None:
+        # fallback: take base before hyphen (e.g., 'en-AU' -> 'en')
+        base = c.split("-")[0].lower()
+        mapped = DG_LANG_MAP.get(base, base)
+    # if English, return None (we don't need a non-English question)
+    return None if mapped == "en" else mapped
+
 # --- Route: POST /classify-intent (Vapi tool format) ---
 @classify_bp.route("/classify-intent", methods=["POST"])
 def classify_intent():
@@ -164,7 +197,8 @@ def classify_intent():
               "client_id": "uuid",
               "conversation": "The conversation history content",
               "vapi_webhook_event_id": "webhook_event_id",
-              "call_id": "CAxxxxxxxx"       // optional but preferred
+              "call_id": "CAxxxxxxxx",            // optional but preferred
+              "caller_language": "nl"              // Deepgram code (e.g., en, en-US, nl, fr, de, es, pt-BR, ja, ko, zh, zh-TW)
             }
           }
         ]
@@ -196,6 +230,7 @@ def classify_intent():
         conversation = (args.get("conversation") or "").strip()
         vapi_event_id = (args.get("vapi_webhook_event_id") or "").strip()
         provided_call_id = (args.get("call_id") or "").strip()
+        caller_language = (args.get("caller_language") or "").strip()  # Deepgram language code if provided
 
         # Validate
         missing = [k for k in ["client_id", "conversation", "vapi_webhook_event_id"] if not args.get(k)]
@@ -209,12 +244,24 @@ def classify_intent():
             results.append({"toolCallId": tool_id, "result": "Conversation missing user content"})
             continue
 
-        # 2) Detect + translate
-        detected_lang = _detect_language_simple(user_text)
-        if detected_lang != "en":
-            utter_en, _ = translate_to_english(user_text)
+        # 2) Decide language & translate only if not English
+        # Prefer explicit caller_language from Vapi (Deepgram); fallback to simple heuristic if missing.
+        is_english = False
+        if caller_language:
+            is_english = caller_language == "en" or caller_language.startswith("en-")
         else:
-            utter_en = user_text
+            # fallback heuristic only if caller_language not provided
+            detected_lang = _detect_language_simple(user_text)
+            caller_language = detected_lang  # store something for logging
+            is_english = detected_lang == "en"
+
+        if is_english:
+            utter_en, _translate_ms = user_text, 0
+        else:
+            utter_en, _translate_ms = translate_to_english(user_text)
+
+        # Language to use for clarifying question (None = English)
+        target_lang = normalize_target_language(caller_language)
 
         # 3) Embed + shortlist
         vec, embed_ms, emb_model = embed_english(utter_en)
@@ -225,7 +272,7 @@ def classify_intent():
                       for t in top for i in intents if i["id"] == t["intent_id"]]
 
         # 4) Classify (JSON schema)
-        cls = classify_with_openrouter(utter_en, candidates, detected_lang)
+        cls = classify_with_openrouter(utter_en, candidates, target_lang)
 
         # Clarifier override (if curated)
         clarify_q = cls.get("clarify_question") or ""
@@ -262,7 +309,7 @@ def classify_intent():
                 "completion_tokens": cls.get("completion_tokens"),
                 "router_version": "v1",
                 "utterance": _redact_pii(user_text),
-                "detected_lang": detected_lang,
+                "detected_lang": caller_language or None,
                 "utterance_en": _redact_pii(utter_en)
             }).execute()
         except Exception:
