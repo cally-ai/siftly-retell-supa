@@ -7,10 +7,11 @@ from flask import Flask
 from utils.logger import setup_logger
 from config import Config, config
 from routes.health_routes import health_bp
+from routes.webhook_routes import webhook_bp
 
-
-from routes.vapi_routes import vapi_bp
-from routes.ivr_routes import ivr_bp
+# TODO: Implement these routes
+# from routes.vapi_routes import vapi_bp
+# from routes.ivr_routes import ivr_bp
 from routes.classify_intent import classify_bp
 
 # Version check for debugging
@@ -54,10 +55,12 @@ def create_app(config_name=None):
     
     # Register blueprints
     app.register_blueprint(health_bp)
+    app.register_blueprint(webhook_bp)
 
-    app.register_blueprint(vapi_bp)
-    app.register_blueprint(ivr_bp)
-    app.register_blueprint(classify_bp, url_prefix="")
+    # TODO: Register these when implemented
+    # app.register_blueprint(vapi_bp)
+    # app.register_blueprint(ivr_bp)
+    # app.register_blueprint(classify_bp, url_prefix="")  # Commented out for local testing
     
     # Error handlers
     @app.errorhandler(404)

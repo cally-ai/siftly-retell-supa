@@ -4,24 +4,39 @@ from typing import List, Dict, Any, Optional
 from flask import Blueprint, request, jsonify
 from supabase import create_client, Client
 from openai import OpenAI
+from config import Config
 
 # --- Blueprint dedicated to this feature ---
 classify_bp = Blueprint("classify_bp", __name__)
 
-# --- Env (expects you already have these set) ---
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]               # embeddings
-OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]       # translate + classify
+# --- Configuration ---
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 CLASSIFY_MODEL = os.getenv("CLASSIFY_MODEL", "anthropic/claude-3.5-sonnet")
 TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "openai/gpt-4o-mini")
 TOP_K = int(os.getenv("TOP_K", "7"))
 
-# --- Clients ---
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-emb_client = OpenAI(api_key=OPENAI_API_KEY)                                   # OpenAI embeddings
-or_client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)  # OpenRouter (OpenAI-compatible)
+# --- Clients (lazy initialization) ---
+_supabase_client = None
+_emb_client = None
+_or_client = None
+
+def get_supabase_client() -> Client:
+    global _supabase_client
+    if _supabase_client is None:
+        _supabase_client = create_client(Config.SUPABASE_URL, Config.SUPABASE_SERVICE_ROLE_KEY)
+    return _supabase_client
+
+def get_emb_client() -> OpenAI:
+    global _emb_client
+    if _emb_client is None:
+        _emb_client = OpenAI(api_key=Config.OPENAI_API_KEY)
+    return _emb_client
+
+def get_or_client() -> OpenAI:
+    global _or_client
+    if _or_client is None:
+        _or_client = OpenAI(api_key=Config.OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
+    return _or_client
 
 # --- Helpers ---
 def _extract_last_user_text(conversation: str) -> str:
@@ -46,7 +61,7 @@ def _json_string(obj: Any) -> str:
 def translate_to_english(text: str) -> tuple[str, int]:
     if not text: return "", 0
     t0 = time.time()
-    resp = or_client.chat.completions.create(
+    resp = get_or_client().chat.completions.create(
         model=TRANSLATE_MODEL,
         messages=[
             {"role": "system", "content": "Translate to neutral English. Return only the translation."},
@@ -59,7 +74,7 @@ def translate_to_english(text: str) -> tuple[str, int]:
 
 def embed_english(text: str) -> tuple[list[float], int, str]:
     t0 = time.time()
-    resp = emb_client.embeddings.create(model="text-embedding-3-small", input=text)
+    resp = get_emb_client().embeddings.create(model="text-embedding-3-small", input=text)
     latency_ms = int((time.time() - t0) * 1000)
     return resp.data[0].embedding, latency_ms, "text-embedding-3-small"
 

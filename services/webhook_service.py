@@ -243,35 +243,38 @@ class WebhookService:
                 logger.warning(f"twilio_number {to_number} has no client_id")
                 return None
 
-            # Step 2: Fetch client_vapi_dynamic_variables from the new view table
+            # Step 2: Get client information and configuration
             dynamic_variables: Dict[str, Any] = {}
-            cdv_resp = self.supabase.table('client_vapi_dynamic_variables').select('*').eq('client_id', client_id).limit(1).execute()
-            if cdv_resp.data:
-                cdv = cdv_resp.data[0]
-                
-                # Add all fields from the view except client_id and nested objects
-                for k, v in cdv.items():
-                    if k not in ('client_id', 'workflow_variables', 'agent__name') and v is not None:
-                        dynamic_variables[k] = v
-                
-                # Handle workflow_variables - flatten them into the main response
-                workflow_variables = cdv.get('workflow_variables', {})
-                if isinstance(workflow_variables, dict):
-                    for k, v in workflow_variables.items():
-                        if v is not None:
-                            dynamic_variables[k] = v
-                
-                # Handle agent__name array - convert to key-value pairs
-                agent_names = cdv.get('agent__name', [])
-                if isinstance(agent_names, list):
-                    for agent_name_pair in agent_names:
-                        if isinstance(agent_name_pair, str) and '=' in agent_name_pair:
-                            parts = agent_name_pair.split('=', 1)
-                            if len(parts) == 2:
-                                key = parts[0].strip()
-                                value = parts[1].strip()
-                                if key:
-                                    dynamic_variables[key] = value
+            
+            # Get client basic info
+            client_resp = self.supabase.table('client').select('name, client_description').eq('id', client_id).limit(1).execute()
+            if client_resp.data:
+                client = client_resp.data[0]
+                dynamic_variables['company_name'] = client.get('name', 'Our Company')
+                dynamic_variables['company_name_agent'] = client.get('name', 'Our Company')
+                dynamic_variables['client_description'] = client.get('client_description', '')
+
+            # Get client workflow configuration
+            wf_resp = self.supabase.table('client_workflow_configuration').select('*').eq('client_id', client_id).limit(1).execute()
+            if wf_resp.data:
+                wf_config = wf_resp.data[0]
+                # Add workflow configuration as dynamic variables
+                for key, value in wf_config.items():
+                    if key != 'id' and key != 'client_id' and value is not None:
+                        dynamic_variables[f'workflow_{key}'] = value
+
+            # Get client language agent names
+            agent_names_resp = self.supabase.table('client_language_agent_name').select('language_id, agent_name').eq('client_id', client_id).execute()
+            if agent_names_resp.data:
+                for agent_record in agent_names_resp.data:
+                    language_id = agent_record.get('language_id')
+                    agent_name = agent_record.get('agent_name')
+                    if language_id and agent_name:
+                        # Get language code for the key
+                        lang_resp = self.supabase.table('language').select('language_code').eq('id', language_id).limit(1).execute()
+                        if lang_resp.data:
+                            lang_code = lang_resp.data[0].get('language_code', 'en')
+                            dynamic_variables[f'agent_name_{lang_code}'] = agent_name
 
             logger.info(f"Returning dynamic variables from Supabase: {list(dynamic_variables.keys())}")
             logger.info(f"=== SUPABASE LOOKUP END (async) ===")
@@ -313,7 +316,7 @@ class WebhookService:
             phone_number_id: The phone_number_id from the incoming payload
             
         Returns:
-            The vapi_language_code value or None if not found
+            The language_code value or None if not found
         """
         try:
             logger.info(f"Looking up caller language for phone_number_id: {phone_number_id}")
@@ -326,20 +329,119 @@ class WebhookService:
             if not language_id:
                 logger.warning(f"No language_id set for phone_number_id: {phone_number_id}")
                 return None
-            lang_resp = self.supabase.table('language').select('vapi_language_code').eq('id', language_id).limit(1).execute()
+            lang_resp = self.supabase.table('language').select('language_code').eq('id', language_id).limit(1).execute()
             if not lang_resp.data:
                 logger.warning(f"Language not found for id: {language_id}")
                 return None
-            vapi_language_code = lang_resp.data[0].get('vapi_language_code')
-            if vapi_language_code:
-                logger.info(f"Found caller language: {vapi_language_code} for phone_number_id: {phone_number_id}")
-                return vapi_language_code
-            logger.warning(f"No vapi_language_code found for language id: {language_id}")
+            language_code = lang_resp.data[0].get('language_code')
+            if language_code:
+                logger.info(f"Found caller language: {language_code} for phone_number_id: {phone_number_id}")
+                return language_code
+            logger.warning(f"No language_code found for language id: {language_id}")
             return None
                 
         except Exception as e:
             logger.error(f"Error getting caller language for phone_number_id {phone_number_id}: {e}")
             return None
+
+    def process_inbound_webhook(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process inbound webhook from Retell AI
+        
+        Args:
+            data: The webhook payload from Retell AI
+            
+        Returns:
+            Response with dynamic variables and metadata
+        """
+        try:
+            # Extract data from the webhook
+            inbound_data = data.get('call_inbound', {})
+            from_number = inbound_data.get('from_number', '')
+            to_number = inbound_data.get('to_number', '')
+            agent_id = inbound_data.get('agent_id', '')
+            phone_number_id = inbound_data.get('phone_number_id', '')
+            
+            logger.info(f"Processing inbound webhook - From: {from_number}, To: {to_number}, Agent: {agent_id}")
+            
+            # Get customer data based on to_number
+            customer_data = self._get_customer_data(to_number)
+            customer_known = customer_data is not None
+            
+            # Get caller language from phone_number_id
+            caller_language = self._get_caller_language_from_phone_id(phone_number_id)
+            
+            # Build dynamic variables
+            dynamic_variables = {}
+            if customer_known and customer_data:
+                # Use customer data from Supabase
+                dynamic_variables.update(customer_data)
+                logger.info(f"Using customer data for known customer: {list(customer_data.keys())}")
+            else:
+                # Default variables for unknown customers
+                dynamic_variables = {
+                    'customer_name': 'Valued Customer',
+                    'customer_id': 'unknown',
+                    'account_type': 'standard',
+                    'preferred_language': caller_language or 'en',
+                    'company_name': 'Our Company',
+                    'company_name_agent': 'Our Company'
+                }
+                logger.info("Using default variables for unknown customer")
+            
+            # Add caller language if available
+            if caller_language:
+                dynamic_variables['caller_language'] = caller_language
+            
+            # Build metadata
+            metadata = {
+                'inbound_timestamp': datetime.now().isoformat(),
+                'from_number': from_number,
+                'to_number': to_number,
+                'original_agent_id': agent_id,
+                'customer_known': customer_known,
+                'phone_number_id': phone_number_id
+            }
+            
+            # Build response
+            response = {
+                'call_inbound': {
+                    'dynamic_variables': dynamic_variables,
+                    'metadata': metadata
+                }
+            }
+            
+            # Add agent override if customer has a preferred agent
+            if customer_known and customer_data and 'preferred_agent_id' in customer_data:
+                response['call_inbound']['override_agent_id'] = customer_data['preferred_agent_id']
+                logger.info(f"Overriding agent to: {customer_data['preferred_agent_id']}")
+            
+            logger.info(f"Inbound webhook processed successfully. Customer known: {customer_known}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error processing inbound webhook: {e}")
+            # Return a safe default response
+            return {
+                'call_inbound': {
+                    'dynamic_variables': {
+                        'customer_name': 'Valued Customer',
+                        'customer_id': 'unknown',
+                        'account_type': 'standard',
+                        'preferred_language': 'en',
+                        'company_name': 'Our Company',
+                        'company_name_agent': 'Our Company'
+                    },
+                    'metadata': {
+                        'inbound_timestamp': datetime.now().isoformat(),
+                        'from_number': from_number if 'from_number' in locals() else 'unknown',
+                        'to_number': to_number if 'to_number' in locals() else 'unknown',
+                        'original_agent_id': agent_id if 'agent_id' in locals() else 'unknown',
+                        'customer_known': False,
+                        'error': str(e)
+                    }
+                }
+            }
 
 # Global instance
 webhook_service = WebhookService() 
