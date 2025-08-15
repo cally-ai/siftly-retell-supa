@@ -233,10 +233,17 @@ class WebhookService:
         logger.info(f"=== SUPABASE LOOKUP START (async) ===")
         
         try:
-            # Step 1: Find client via twilio_number
-            tw_resp = self.supabase.table('twilio_number').select('client_id').eq('twilio_number', to_number).limit(1).execute()
+            # Clean phone number by removing spaces and special characters
+            cleaned_number = to_number.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+            logger.info(f"Original number: {to_number}, Cleaned number: {cleaned_number}")
+            
+            # Step 1: Find client via twilio_number (try both original and cleaned)
+            tw_resp = self.supabase.table('twilio_number').select('client_id').eq('twilio_number', cleaned_number).limit(1).execute()
             if not tw_resp.data:
-                logger.warning(f"No twilio_number record found for: {to_number}")
+                # Fallback to original number if cleaned doesn't work
+                tw_resp = self.supabase.table('twilio_number').select('client_id').eq('twilio_number', to_number).limit(1).execute()
+            if not tw_resp.data:
+                logger.warning(f"No twilio_number record found for: {to_number} (cleaned: {cleaned_number})")
                 return None
             client_id = tw_resp.data[0].get('client_id')
             if not client_id:
