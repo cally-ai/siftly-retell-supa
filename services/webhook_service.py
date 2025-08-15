@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 import pytz
 from supabase import create_client
+from twilio.rest import Client
 from config import Config
 from utils.logger import get_logger
 
@@ -17,6 +18,7 @@ class WebhookService:
     def __init__(self):
         """Initialize webhook service"""
         self._supabase_client = None
+        self._twilio_client = None
 
     @property
     def supabase(self):
@@ -31,6 +33,20 @@ class WebhookService:
                 logger.error(f"Could not initialize Supabase client: {e}")
                 raise
         return self._supabase_client
+
+    @property
+    def twilio(self):
+        """Lazy-init Twilio client"""
+        if self._twilio_client is None:
+            try:
+                self._twilio_client = Client(
+                    Config.TWILIO_ACCOUNT_SID,
+                    Config.TWILIO_AUTH_TOKEN
+                )
+            except Exception as e:
+                logger.error(f"Could not initialize Twilio client: {e}")
+                raise
+        return self._twilio_client
 
     def process_business_hours_check(self, data: Dict[str, Any]) -> Dict[str, str]:
         """
@@ -407,6 +423,49 @@ class WebhookService:
             logger.error(f"Error getting caller language for phone_number_id {phone_number_id}: {e}")
             return None
 
+    def _update_twilio_call_details(self, call_sid: str) -> None:
+        """
+        Fetch call details from Twilio API and update the twilio_call record
+        
+        Args:
+            call_sid: The Twilio call SID to fetch details for
+        """
+        try:
+            logger.info(f"Fetching Twilio call details for SID: {call_sid}")
+            
+            # Fetch call details from Twilio
+            call = self.twilio.calls(call_sid).fetch()
+            
+            # Extract call details
+            twilio_call_data = {
+                'account_sid': call.account_sid,
+                'from_number': call.from_,
+                'to_number': call.to,
+                'start_time': call.start_time.isoformat() if call.start_time else None,
+                'end_time': call.end_time.isoformat() if call.end_time else None,
+                'duration': call.duration,
+                'direction': call.direction,
+                'answered_by': call.answered_by,
+                'forwarded_from': call.forwarded_from,
+                'price': call.price,
+                'call_type': call.call_type if hasattr(call, 'call_type') else None
+            }
+            
+            # Remove None values to avoid overwriting with null
+            twilio_call_data = {k: v for k, v in twilio_call_data.items() if v is not None}
+            
+            logger.info(f"Twilio call details - Duration: {twilio_call_data.get('duration')}s, Direction: {twilio_call_data.get('direction')}")
+            
+            # Update the twilio_call record
+            twilio_response = self.supabase.table('twilio_call').update(twilio_call_data).eq('call_sid', call_sid).execute()
+            if hasattr(twilio_response, 'error') and twilio_response.error:
+                logger.error(f"Error updating twilio_call record: {twilio_response.error}")
+            else:
+                logger.info(f"Successfully updated twilio_call record with Twilio details")
+                
+        except Exception as e:
+            logger.error(f"Error fetching/updating Twilio call details: {e}")
+
     def _handle_call_ended_event(self, data: Dict[str, Any]) -> None:
         """
         Handle call_ended events by updating existing retell_event record
@@ -468,6 +527,7 @@ class WebhookService:
     def _handle_call_analyzed_event(self, data: Dict[str, Any]) -> None:
         """
         Handle call_analyzed events by updating existing retell_event record with call analysis data
+        and then fetching complete call details from Twilio
         
         Args:
             data: The webhook payload from Retell AI
@@ -515,6 +575,16 @@ class WebhookService:
                 logger.error(f"Error updating retell_event record: {retell_response.error}")
             else:
                 logger.info(f"Successfully updated retell_event record for call_analyzed event with call analysis data")
+            
+            # Now fetch and update Twilio call details
+            telephony_identifier = call_data.get('telephony_identifier', {})
+            twilio_call_sid = telephony_identifier.get('twilio_call_sid', '')
+            
+            if twilio_call_sid:
+                logger.info(f"Fetching Twilio call details for SID: {twilio_call_sid}")
+                self._update_twilio_call_details(twilio_call_sid)
+            else:
+                logger.warning("No Twilio call SID found, skipping Twilio call details update")
                 
         except Exception as e:
             logger.error(f"Error handling call_analyzed event: {e}")
