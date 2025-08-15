@@ -36,6 +36,12 @@ def inbound_webhook():
         # Get request data
         data = request.get_json()
         
+        # Log the full webhook payload
+        logger.info(f"=== INBOUND WEBHOOK PAYLOAD ===")
+        logger.info(f"Full payload: {data}")
+        logger.info(f"Headers: {dict(request.headers)}")
+        logger.info(f"=== END PAYLOAD ===")
+        
         if not data:
             logger.error("No JSON data received in webhook")
             return jsonify({
@@ -56,6 +62,11 @@ def inbound_webhook():
         # Process the webhook
         webhook_service = WebhookService()
         response_data = webhook_service.process_inbound_webhook(data)
+        
+        # Log the response we're sending back
+        logger.info(f"=== WEBHOOK RESPONSE ===")
+        logger.info(f"Response data: {response_data}")
+        logger.info(f"=== END RESPONSE ===")
         
         logger.info(f"Inbound webhook processed successfully for call from {data.get('call_inbound', {}).get('from_number', 'unknown')}")
         
