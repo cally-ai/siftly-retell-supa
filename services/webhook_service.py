@@ -436,19 +436,23 @@ class WebhookService:
             # Fetch call details from Twilio
             call = self.twilio.calls(call_sid).fetch()
             
-            # Extract call details
+            # Debug: Log available attributes
+            logger.info(f"Twilio call object attributes: {dir(call)}")
+            logger.info(f"Twilio call object: {call}")
+            
+            # Extract call details - use proper Twilio API attributes
             twilio_call_data = {
-                'account_sid': call.account_sid,
-                'from_number': call.from_,
-                'to_number': call.to,
-                'start_time': call.start_time.isoformat() if call.start_time else None,
-                'end_time': call.end_time.isoformat() if call.end_time else None,
-                'duration': call.duration,
-                'direction': call.direction,
-                'answered_by': call.answered_by,
-                'forwarded_from': call.forwarded_from,
-                'price': call.price,
-                'call_type': call.call_type if hasattr(call, 'call_type') else None
+                'account_sid': getattr(call, 'account_sid', None),
+                'from_number': getattr(call, 'from_', None),
+                'to_number': getattr(call, 'to', None),
+                'start_time': call.start_time.isoformat() if hasattr(call, 'start_time') and call.start_time else None,
+                'end_time': call.end_time.isoformat() if hasattr(call, 'end_time') and call.end_time else None,
+                'duration': getattr(call, 'duration', None),
+                'direction': getattr(call, 'direction', None),
+                'answered_by': getattr(call, 'answered_by', None),
+                'forwarded_from': getattr(call, 'forwarded_from', None),
+                'price': getattr(call, 'price', None),
+                'call_type': getattr(call, 'call_type', None)
             }
             
             # Remove None values to avoid overwriting with null
