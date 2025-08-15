@@ -6,7 +6,7 @@ import re
 
 def validate_retell_inbound_webhook(data: Dict[str, Any]) -> None:
     """
-    Validate Retell inbound webhook data
+    Validate Retell webhook data (supports both call_inbound and call_started events)
     
     Args:
         data: The webhook payload to validate
@@ -21,15 +21,22 @@ def validate_retell_inbound_webhook(data: Dict[str, Any]) -> None:
     if 'event' not in data:
         raise ValueError("Missing required field: event")
     
-    if data['event'] != 'call_inbound':
-        raise ValueError("Event must be 'call_inbound'")
+    # Accept both call_inbound and call_started events
+    if data['event'] not in ['call_inbound', 'call_started']:
+        raise ValueError("Event must be 'call_inbound' or 'call_started'")
     
-    if 'call_inbound' not in data:
-        raise ValueError("Missing required field: call_inbound")
+    # Handle different payload structures
+    if data['event'] == 'call_inbound':
+        if 'call_inbound' not in data:
+            raise ValueError("Missing required field: call_inbound")
+        inbound_data = data['call_inbound']
+    elif data['event'] == 'call_started':
+        if 'call' not in data:
+            raise ValueError("Missing required field: call")
+        inbound_data = data['call']
     
-    inbound_data = data['call_inbound']
     if not isinstance(inbound_data, dict):
-        raise ValueError("call_inbound must be a dictionary")
+        raise ValueError("call data must be a dictionary")
     
     # Validate phone numbers if present
     for field in ['from_number', 'to_number']:
