@@ -276,9 +276,10 @@ class WebhookService:
                 client = client_resp.data[0]
                 client_name = client.get('name', 'Our Company')
                 client_description = client.get('client_description', '')
+                dynamic_variables['client_id'] = client_id  # Add client_id for function calls
                 dynamic_variables['client_name'] = client_name
                 dynamic_variables['client_description'] = client_description
-                logger.info(f"Client data - name: '{client_name}', description: '{client_description}'")
+                logger.info(f"Client data - client_id: '{client_id}', name: '{client_name}', description: '{client_description}'")
 
             # Get client workflow configuration
             wf_resp = self.supabase.table('client_workflow_configuration').select('*').eq('client_id', client_id).limit(1).execute()
