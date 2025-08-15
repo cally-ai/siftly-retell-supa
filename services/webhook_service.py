@@ -286,11 +286,11 @@ class WebhookService:
             if wf_resp.data:
                 wf_config = wf_resp.data[0]
                 logger.info(f"Workflow config raw data: {wf_config}")
-                # Add workflow configuration as dynamic variables
+                # Add workflow configuration as dynamic variables (without workflow_ prefix)
                 for key, value in wf_config.items():
                     if key != 'id' and key != 'client_id' and value is not None:
-                        dynamic_variables[f'workflow_{key}'] = value
-                        logger.info(f"Added workflow_{key}: '{value}'")
+                        dynamic_variables[key] = value
+                        logger.info(f"Added {key}: '{value}'")
 
             # Get client language agent names
             agent_names_resp = self.supabase.table('client_language_agent_name').select('language_id, agent_name').eq('client_id', client_id).execute()
