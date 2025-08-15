@@ -10,7 +10,6 @@ load_dotenv()
 # Debug: Print all environment variables
 import os
 print("=== ENVIRONMENT VARIABLES DEBUG ===")
-print(f"VAPI_API_KEY: {os.getenv('VAPI_API_KEY', 'NOT SET')}")
 print(f"TWILIO_ACCOUNT_SID: {os.getenv('TWILIO_ACCOUNT_SID', 'NOT SET')}")
 print(f"TWILIO_AUTH_TOKEN: {os.getenv('TWILIO_AUTH_TOKEN', 'NOT SET')}")
 print(f"TWILIO_PHONE_NUMBER: {os.getenv('TWILIO_PHONE_NUMBER', 'NOT SET')}")
@@ -35,9 +34,6 @@ class Config:
     # Retell AI Configuration
     RETELL_WEBHOOK_SECRET = os.getenv('RETELL_WEBHOOK_SECRET')
     RETELL_API_KEY = os.getenv('RETELL_API_KEY')
-    
-    # VAPI AI Configuration
-    VAPI_API_KEY = os.getenv('VAPI_API_KEY')
     
     # Twilio Configuration
     TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')

@@ -1,10 +1,10 @@
-# Siftly - Webhook & IVR Service
+# Siftly - Retell AI Webhook Handler
 
-A Python Flask application that handles IVR flows, VAPI webhooks, and stores data in Supabase.
+A Python Flask application that handles Retell AI webhooks, IVR flows, and stores data in Supabase.
 
 ## Features
 
-- **IVR and VAPI handlers**: Endpoints for IVR and VAPI integrations
+- **Retell AI webhook handlers**: Endpoints for Retell AI integrations
 - **Supabase-backed storage**: Reads/writes operational data to Supabase
 - **Modular Architecture**: Clean separation of concerns with services, routes, and utilities
 - **Deployment Ready**: Configured for easy deployment on Render
@@ -46,7 +46,7 @@ The application will be available at `http://localhost:5000`
 
 ### Supabase Setup
 
-Provide `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in your environment. Ensure your database schema matches the application’s expected tables (e.g., `client`, `twilio_number`, `client_dynamic_variables`, `language`, `caller`, `client_caller`, `twilio_call`, `vapi_webhook_event`, `vapi_workflow`, `opening_hours`, `timezone`, `client_ivr_language_configuration`, `client_ivr_language_configuration_language`, `client_language_agent_name`).
+Provide `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in your environment. Ensure your database schema matches the application’s expected tables (e.g., `client`, `twilio_number`, `client_workflow_configuration`, `language`, `caller`, `client_caller`, `twilio_call`, `retell_event`, `opening_hours`, `timezone`, `client_ivr_language_configuration`, `client_ivr_language_configuration_language`, `client_language_agent_name`).
 
 ## Deployment on Render
 
@@ -93,7 +93,7 @@ Simple ping endpoint for load balancers.
 
 ### Modifying Schema
 
-Update the Supabase queries in `services/webhook_service.py`, `routes/ivr_routes.py`, and `routes/vapi_routes.py` if your schema changes.
+Update the Supabase queries in `services/webhook_service.py` and `routes/webhook_routes.py` if your schema changes.
 
 ### Adding New Services
 

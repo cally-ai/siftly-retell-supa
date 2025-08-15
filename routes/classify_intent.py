@@ -79,13 +79,13 @@ def embed_english(text: str) -> tuple[list[float], int, str]:
     return resp.data[0].embedding, latency_ms, "text-embedding-3-small"
 
 def match_topk(client_id: str, vec: list[float], k: int) -> list[dict]:
-    r = supabase.rpc("match_intents", {"client_row_id": client_id, "query_embedding": vec, "match_count": k}).execute()
+    r = get_supabase_client().rpc("match_intents", {"client_row_id": client_id, "query_embedding": vec, "match_count": k}).execute()
     if r.error: raise RuntimeError(r.error.message)
     return r.data or []
 
 def load_intents(intent_ids: list[str]) -> list[dict]:
     if not intent_ids: return []
-    r = supabase.table("intent").select(
+    r = get_supabase_client().table("intent").select(
         "id,name,description,category_id,action_policy_override,transfer_number_override,priority,routing_target"
     ).in_("id", intent_ids).execute()
     if r.error: raise RuntimeError(r.error.message)
@@ -93,14 +93,14 @@ def load_intents(intent_ids: list[str]) -> list[dict]:
 
 def load_category(category_id: Optional[str]) -> Optional[dict]:
     if not category_id: return None
-    r = supabase.table("intent_category").select(
+    r = get_supabase_client().table("intent_category").select(
         "id,name,default_action_policy,transfer_number,priority"
     ).eq("id", category_id).single().execute()
     return None if getattr(r, "error", None) else r.data
 
 def get_curated_clarifier(a: str, b: str) -> Optional[str]:
     cond = f"and(intent_id_a.eq.{a},intent_id_b.eq.{b}),and(intent_id_a.eq.{b},intent_id_b.eq.{a})"
-    r = supabase.table("intent_clarifier").select("question,intent_id_a,intent_id_b").or_(cond).maybe_single().execute()
+    r = get_supabase_client().table("intent_clarifier").select("question,intent_id_a,intent_id_b").or_(cond).maybe_single().execute()
     return None if getattr(r, "error", None) else (r.data or {}).get("question")
 
 def classify_with_openrouter(utter_en: str, candidates: list[dict], target_language: Optional[str]) -> dict:
@@ -134,7 +134,7 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
     }
     cand_list = "\n".join([f"- [{c['id']}] {c['name']}: {c.get('description','')}".strip() for c in candidates])
     t0 = time.time()
-    resp = or_client.chat.completions.create(
+    resp = get_or_client().chat.completions.create(
         model=CLASSIFY_MODEL,
         messages=[
             {"role": "system", "content": "You are a call intent classifier. Choose exactly one best intent from the candidate list. If uncertain, set needs_clarification=true and output ONE short question." + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")},
@@ -159,10 +159,10 @@ def effective_policy(intent_row: dict, category_row: Optional[dict]) -> dict:
     category_name = (category_row or {}).get("name") or intent_row.get("routing_target")
     return {"action_policy": action, "transfer_number": number, "category_name": category_name}
 
-def _resolve_call_id(call_id: Optional[str], vapi_webhook_event_id: Optional[str]) -> str:
+def _resolve_call_id(call_id: Optional[str], retell_event_id: Optional[str]) -> str:
     if call_id: return call_id.strip()
-    ev = (vapi_webhook_event_id or "").strip()
-    return f"VAPI:{ev}" if ev else f"auto:{uuidlib.uuid4()}"
+    ev = (retell_event_id or "").strip()
+    return f"RETELL:{ev}" if ev else f"auto:{uuidlib.uuid4()}"
 
 # --- Language normalization helpers ---
 DG_LANG_MAP = {
@@ -199,11 +199,11 @@ def normalize_target_language(caller_lang: Optional[str]) -> Optional[str]:
         mapped = DG_LANG_MAP.get(base, base)
     return None if mapped == "en" else mapped
 
-# --- Route: POST /classify-intent (Vapi tool format) ---
+# --- Route: POST /classify-intent (Retell tool format) ---
 @classify_bp.route("/classify-intent", methods=["POST"])
 def classify_intent():
     """
-    Input JSON (Vapi):
+    Input JSON (Retell):
     {
       "message": {
         "toolCallList": [
@@ -213,7 +213,7 @@ def classify_intent():
             "arguments": {
               "client_id": "uuid",
               "conversation": "The conversation history content",
-              "vapi_webhook_event_id": "webhook_event_id",
+                             "retell_event_id": "webhook_event_id",
               "call_id": "CAxxxxxxxx",            // optional but preferred
               "caller_language": "nl"              // Deepgram code (e.g., en, en-US, nl, fr, de, es, pt-BR, ja, ko, zh, zh-TW)
             }
@@ -245,12 +245,12 @@ def classify_intent():
 
         client_id = (args.get("client_id") or "").strip()
         conversation = (args.get("conversation") or "").strip()
-        vapi_event_id = (args.get("vapi_webhook_event_id") or "").strip()
+        retell_event_id = (args.get("retell_event_id") or "").strip()
         provided_call_id = (args.get("call_id") or "").strip()
         caller_language = (args.get("caller_language") or "").strip()  # Deepgram language code if provided
 
         # Validate
-        missing = [k for k in ["client_id", "conversation", "vapi_webhook_event_id"] if not args.get(k)]
+        missing = [k for k in ["client_id", "conversation", "retell_event_id"] if not args.get(k)]
         if missing:
             results.append({"toolCallId": tool_id, "result": f"Missing required fields: {', '.join(missing)}"})
             continue
@@ -262,7 +262,7 @@ def classify_intent():
             continue
 
         # 2) Decide language & translate only if not English
-        # Prefer explicit caller_language from Vapi; else heuristic
+        # Prefer explicit caller_language from Retell; else heuristic
         if caller_language:
             c_low = caller_language.lower()
             is_english = (c_low == "en") or c_low.startswith("en-")
@@ -307,9 +307,9 @@ def classify_intent():
         routing = effective_policy(best_row or {}, category)
 
         # 6) Log (rich but safe)
-        call_id = _resolve_call_id(provided_call_id, vapi_event_id)
+        call_id = _resolve_call_id(provided_call_id, retell_event_id)
         try:
-            supabase.table("call_reason_log").insert({
+            get_supabase_client().table("call_reason_log").insert({
                 "client_id": client_id,
                 "call_id": call_id,
                 "primary_intent_id": (best_row or {}).get("id"),
