@@ -79,6 +79,59 @@ def inbound_webhook():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+@webhook_bp.route('/business-hours', methods=['POST'])
+def business_hours_webhook():
+    """
+    Handle business hours check function calls from Retell AI
+    
+    Expected payload structure:
+    {
+        "name": "siftly_check_business_hours",
+        "args": {
+            "client_id": "uuid-of-client"
+        }
+    }
+    
+    Returns:
+        JSON response with within_business_hours status
+    """
+    try:
+        # Get request data
+        data = request.get_json()
+        
+        # Log the full webhook payload
+        logger.info(f"=== BUSINESS HOURS WEBHOOK PAYLOAD ===")
+        logger.info(f"Full payload: {data}")
+        logger.info(f"Headers: {dict(request.headers)}")
+        logger.info(f"=== END PAYLOAD ===")
+        
+        if not data:
+            logger.error("No JSON data received in business hours webhook")
+            return jsonify({
+                'error': 'No JSON data received',
+                'timestamp': datetime.now().isoformat()
+            }), 400
+        
+        # Process the business hours check
+        webhook_service = WebhookService()
+        response_data = webhook_service.process_business_hours_check(data)
+        
+        # Log the response we're sending back
+        logger.info(f"=== BUSINESS HOURS RESPONSE ===")
+        logger.info(f"Response data: {response_data}")
+        logger.info(f"=== END RESPONSE ===")
+        
+        logger.info(f"Business hours check processed successfully for client_id: {data.get('args', {}).get('client_id', 'unknown')}")
+        
+        return jsonify(response_data), 200
+        
+    except Exception as e:
+        logger.error(f"Error processing business hours webhook: {e}")
+        return jsonify({
+            'error': 'Internal server error processing business hours check',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @webhook_bp.route('/test', methods=['GET'])
 def webhook_test():
     """Test endpoint to verify webhook routes are working"""
@@ -87,6 +140,7 @@ def webhook_test():
         'timestamp': datetime.now().isoformat(),
         'endpoints': {
             'inbound': '/webhook/inbound (POST)',
+            'business_hours': '/webhook/business-hours (POST)',
             'test': '/webhook/test (GET)'
         }
     }), 200
