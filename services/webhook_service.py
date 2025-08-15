@@ -638,8 +638,10 @@ class WebhookService:
                     caller_resp = self.supabase.table('caller').select('id, is_customer').eq('phone_number', from_number).limit(1).execute()
                     if caller_resp.data:
                         caller_record = caller_resp.data[0]
-                        caller_known = caller_record.get('is_customer') == 'yes'
-                        logger.info(f"Caller found in database - known: {caller_known}")
+                        is_customer_value = caller_record.get('is_customer', 'unknown')
+                        # Consider caller "known" if they exist in the table
+                        caller_known = True
+                        logger.info(f"Caller found in database - is_customer: {is_customer_value}, known: {caller_known}")
                     else:
                         logger.info("Caller not found in database - will be created during call_started event")
                 
