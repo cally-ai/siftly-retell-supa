@@ -365,6 +365,74 @@ class WebhookService:
             logger.error(f"Error getting caller language for phone_number_id {phone_number_id}: {e}")
             return None
 
+    def _handle_call_started_event(self, data: Dict[str, Any]) -> None:
+        """
+        Handle call_started events by creating records in retell_event and twilio_call tables
+        
+        Args:
+            data: The webhook payload from Retell AI
+        """
+        try:
+            call_data = data.get('call', {})
+            
+            # Extract data from call_started payload
+            call_id = call_data.get('call_id', '')
+            call_type = call_data.get('call_type', '')
+            agent_id = call_data.get('agent_id', '')
+            agent_name = call_data.get('agent_name', '')
+            call_status = call_data.get('call_status', '')
+            from_number = call_data.get('from_number', '')
+            to_number = call_data.get('to_number', '')
+            direction = call_data.get('direction', '')
+            
+            # Extract Twilio call SID from telephony_identifier
+            telephony_identifier = call_data.get('telephony_identifier', {})
+            twilio_call_sid = telephony_identifier.get('twilio_call_sid', '')
+            
+            # Extract dynamic variables if present
+            retell_llm_dynamic_variables = call_data.get('retell_llm_dynamic_variables', {})
+            
+            logger.info(f"Creating database records for call_started event - Call ID: {call_id}, Twilio SID: {twilio_call_sid}")
+            
+            # 1. Create retell_event record
+            retell_event_data = {
+                'call_id': call_id,
+                'call_type': call_type,
+                'agent_id': agent_id,
+                'call_status': call_status,
+                'from_number': from_number,
+                'retell_llm_dynamic_variables': retell_llm_dynamic_variables
+            }
+            
+            retell_response = self.supabase.table('retell_event').insert(retell_event_data).execute()
+            if retell_response.error:
+                logger.error(f"Error creating retell_event record: {retell_response.error}")
+                return
+            
+            retell_event_id = retell_response.data[0]['id'] if retell_response.data else None
+            logger.info(f"Created retell_event record with ID: {retell_event_id}")
+            
+            # 2. Create twilio_call record (if we have a Twilio call SID)
+            if twilio_call_sid:
+                twilio_call_data = {
+                    'call_sid': twilio_call_sid,
+                    'from_number': from_number,
+                    'to_number': to_number,
+                    'direction': direction,
+                    'retell_event_id': retell_event_id  # Link to retell_event
+                }
+                
+                twilio_response = self.supabase.table('twilio_call').insert(twilio_call_data).execute()
+                if twilio_response.error:
+                    logger.error(f"Error creating twilio_call record: {twilio_response.error}")
+                else:
+                    logger.info(f"Created twilio_call record with ID: {twilio_response.data[0]['id'] if twilio_response.data else 'unknown'}")
+            else:
+                logger.warning("No Twilio call SID found, skipping twilio_call record creation")
+                
+        except Exception as e:
+            logger.error(f"Error handling call_started event: {e}")
+
     def process_inbound_webhook(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process inbound webhook from Retell AI
@@ -376,8 +444,18 @@ class WebhookService:
             Response with dynamic variables and metadata
         """
         try:
-            # Extract data from the webhook
-            inbound_data = data.get('call_inbound', {})
+            event_type = data.get('event', '')
+            
+            # Handle call_started events - create database records
+            if event_type == 'call_started':
+                self._handle_call_started_event(data)
+            
+            # Extract data from the webhook (handle both call_inbound and call_started)
+            if event_type == 'call_inbound':
+                inbound_data = data.get('call_inbound', {})
+            else:
+                inbound_data = data.get('call', {})
+                
             from_number = inbound_data.get('from_number', '')
             to_number = inbound_data.get('to_number', '')
             agent_id = inbound_data.get('agent_id', '')
