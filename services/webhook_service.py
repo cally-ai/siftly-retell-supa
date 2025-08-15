@@ -305,6 +305,48 @@ class WebhookService:
             logger.error(f"Error getting customer data for {to_number}: {e}")
             return None
 
+    def _get_or_create_caller(self, from_number: str) -> Optional[str]:
+        """
+        Get or create a caller record based on from_number
+        
+        Args:
+            from_number: The caller's phone number
+            
+        Returns:
+            Caller ID (UUID) or None if failed
+        """
+        try:
+            logger.info(f"Looking up or creating caller for: {from_number}")
+            
+            # First, try to find existing caller
+            caller_resp = self.supabase.table('caller').select('id').eq('phone_number', from_number).limit(1).execute()
+            
+            if caller_resp.data:
+                # Caller exists
+                caller_id = caller_resp.data[0]['id']
+                logger.info(f"Found existing caller with ID: {caller_id}")
+                return caller_id
+            
+            # Caller doesn't exist, create new one
+            logger.info(f"Creating new caller record for: {from_number}")
+            new_caller_data = {
+                'phone_number': from_number,
+                'is_customer': 'unknown'  # We don't know yet
+            }
+            
+            create_resp = self.supabase.table('caller').insert(new_caller_data).execute()
+            if hasattr(create_resp, 'error') and create_resp.error:
+                logger.error(f"Error creating caller record: {create_resp.error}")
+                return None
+            
+            caller_id = create_resp.data[0]['id'] if create_resp.data else None
+            logger.info(f"Created new caller with ID: {caller_id}")
+            return caller_id
+            
+        except Exception as e:
+            logger.error(f"Error in _get_or_create_caller: {e}")
+            return None
+
     def _get_customer_data(self, to_number: str) -> Optional[Dict[str, Any]]:
         """
         Get customer data based on to_number from Supabase
@@ -365,9 +407,122 @@ class WebhookService:
             logger.error(f"Error getting caller language for phone_number_id {phone_number_id}: {e}")
             return None
 
+    def _handle_call_ended_event(self, data: Dict[str, Any]) -> None:
+        """
+        Handle call_ended events by updating existing retell_event record
+        
+        Args:
+            data: The webhook payload from Retell AI
+        """
+        try:
+            call_data = data.get('call', {})
+            
+            # Extract data from call_ended payload
+            call_id = call_data.get('call_id', '')
+            call_status = call_data.get('call_status', '')
+            end_timestamp = call_data.get('end_timestamp', '')
+            disconnection_reason = call_data.get('disconnection_reason', '')
+            transcript = call_data.get('transcript', '')
+            transcript_object = call_data.get('transcript_object', '')
+            transcript_with_tool_calls = call_data.get('transcript_with_tool_calls', '')
+            node_transcript = call_data.get('node_transcript', '')
+            recording_url = call_data.get('recording_url', '')
+            opt_out_sensitive_data_storage = call_data.get('opt_out_sensitive_data_storage', False)
+            
+            logger.info(f"Updating retell_event record for call_ended event - Call ID: {call_id}")
+            
+            # Find existing retell_event record by call_id
+            retell_resp = self.supabase.table('retell_event').select('id').eq('call_id', call_id).limit(1).execute()
+            if not retell_resp.data:
+                logger.error(f"No retell_event record found for call_id: {call_id}")
+                return
+            
+            retell_event_id = retell_resp.data[0]['id']
+            logger.info(f"Found existing retell_event record with ID: {retell_event_id}")
+            
+            # Update retell_event record with call_ended data
+            update_data = {
+                'call_status': call_status,
+                'end_timestamp': end_timestamp,
+                'disconnection_reason': disconnection_reason,
+                'transcript': transcript,
+                'transcript_object': transcript_object,
+                'transcript_with_tool_calls': transcript_with_tool_calls,
+                'node_transcript': node_transcript,
+                'recording_url': recording_url,
+                'opt_out_sensitive_data_storage': opt_out_sensitive_data_storage
+            }
+            
+            # Remove None values to avoid overwriting with null
+            update_data = {k: v for k, v in update_data.items() if v is not None}
+            
+            retell_response = self.supabase.table('retell_event').update(update_data).eq('id', retell_event_id).execute()
+            if hasattr(retell_response, 'error') and retell_response.error:
+                logger.error(f"Error updating retell_event record: {retell_response.error}")
+            else:
+                logger.info(f"Successfully updated retell_event record for call_ended event")
+                
+        except Exception as e:
+            logger.error(f"Error handling call_ended event: {e}")
+
+    def _handle_call_analyzed_event(self, data: Dict[str, Any]) -> None:
+        """
+        Handle call_analyzed events by updating existing retell_event record with call analysis data
+        
+        Args:
+            data: The webhook payload from Retell AI
+        """
+        try:
+            call_data = data.get('call', {})
+            
+            # Extract call_id from call_analyzed payload
+            call_id = call_data.get('call_id', '')
+            
+            # Extract call_analysis data
+            call_analysis = call_data.get('call_analysis', {})
+            call_summary = call_analysis.get('call_summary', '')
+            in_voicemail = call_analysis.get('in_voicemail', False)
+            user_sentiment = call_analysis.get('user_sentiment', '')
+            call_successful = call_analysis.get('call_successful', False)
+            custom_analysis_data = call_analysis.get('custom_analysis_data', {})
+            
+            logger.info(f"Updating retell_event record for call_analyzed event - Call ID: {call_id}")
+            logger.info(f"Call analysis - Summary: {call_summary[:100]}..., Voicemail: {in_voicemail}, Sentiment: {user_sentiment}, Successful: {call_successful}")
+            
+            # Find existing retell_event record by call_id
+            retell_resp = self.supabase.table('retell_event').select('id').eq('call_id', call_id).limit(1).execute()
+            if not retell_resp.data:
+                logger.error(f"No retell_event record found for call_id: {call_id}")
+                return
+            
+            retell_event_id = retell_resp.data[0]['id']
+            logger.info(f"Found existing retell_event record with ID: {retell_event_id}")
+            
+            # Update retell_event record with call_analysis data
+            update_data = {
+                'call_summary': call_summary,
+                'in_voicemail': in_voicemail,
+                'user_sentiment': user_sentiment,
+                'call_successful': call_successful,
+                'custom_analysis_data': custom_analysis_data
+            }
+            
+            # Remove None values to avoid overwriting with null
+            update_data = {k: v for k, v in update_data.items() if v is not None}
+            
+            retell_response = self.supabase.table('retell_event').update(update_data).eq('id', retell_event_id).execute()
+            if hasattr(retell_response, 'error') and retell_response.error:
+                logger.error(f"Error updating retell_event record: {retell_response.error}")
+            else:
+                logger.info(f"Successfully updated retell_event record for call_analyzed event with call analysis data")
+                
+        except Exception as e:
+            logger.error(f"Error handling call_analyzed event: {e}")
+
     def _handle_call_started_event(self, data: Dict[str, Any]) -> None:
         """
         Handle call_started events by creating records in retell_event and twilio_call tables
+        and linking them to caller records
         
         Args:
             data: The webhook payload from Retell AI
@@ -394,13 +549,20 @@ class WebhookService:
             
             logger.info(f"Creating database records for call_started event - Call ID: {call_id}, Twilio SID: {twilio_call_sid}")
             
-            # 1. Create retell_event record
+            # 1. Get or create caller record
+            caller_id = self._get_or_create_caller(from_number)
+            if not caller_id:
+                logger.error(f"Failed to get or create caller for: {from_number}")
+                return
+            
+            # 2. Create retell_event record
             retell_event_data = {
                 'call_id': call_id,
                 'call_type': call_type,
                 'agent_id': agent_id,
                 'call_status': call_status,
                 'from_number': from_number,
+                'to_number': to_number,
                 'retell_llm_dynamic_variables': retell_llm_dynamic_variables
             }
             
@@ -412,14 +574,15 @@ class WebhookService:
             retell_event_id = retell_response.data[0]['id'] if retell_response.data else None
             logger.info(f"Created retell_event record with ID: {retell_event_id}")
             
-            # 2. Create twilio_call record (if we have a Twilio call SID)
+            # 3. Create twilio_call record (if we have a Twilio call SID)
             if twilio_call_sid:
                 twilio_call_data = {
                     'call_sid': twilio_call_sid,
                     'from_number': from_number,
                     'to_number': to_number,
                     'direction': direction,
-                    'retell_event_id': retell_event_id  # Link to retell_event
+                    'retell_event_id': retell_event_id,  # Link to retell_event
+                    'caller_id': caller_id  # Link to caller
                 }
                 
                 twilio_response = self.supabase.table('twilio_call').insert(twilio_call_data).execute()
@@ -446,69 +609,87 @@ class WebhookService:
         try:
             event_type = data.get('event', '')
             
-            # Handle call_started events - create database records
+                        # Handle call_started events - create database records
             if event_type == 'call_started':
                 self._handle_call_started_event(data)
             
-            # Extract data from the webhook (handle both call_inbound and call_started)
+            # Handle call_ended events - update existing retell_event record
+            if event_type == 'call_ended':
+                self._handle_call_ended_event(data)
+            
+            # Handle call_analyzed events - update existing retell_event record
+            if event_type == 'call_analyzed':
+                self._handle_call_analyzed_event(data)
+            
+            # Only process inbound webhook response for call_inbound events
             if event_type == 'call_inbound':
+                # Extract data from call_inbound webhook
                 inbound_data = data.get('call_inbound', {})
-            else:
-                inbound_data = data.get('call', {})
+                from_number = inbound_data.get('from_number', '')
+                to_number = inbound_data.get('to_number', '')
+                agent_id = inbound_data.get('agent_id', '')
+                phone_number_id = inbound_data.get('phone_number_id', '')
                 
-            from_number = inbound_data.get('from_number', '')
-            to_number = inbound_data.get('to_number', '')
-            agent_id = inbound_data.get('agent_id', '')
-            phone_number_id = inbound_data.get('phone_number_id', '')
-            
-            logger.info(f"Processing inbound webhook - From: {from_number}, To: {to_number}, Agent: {agent_id}")
-            
-            # Get customer data based on to_number (includes language info)
-            customer_data = self._get_customer_data(to_number)
-            customer_known = customer_data is not None
-            
-            # Build dynamic variables
-            dynamic_variables = {}
-            if customer_known and customer_data:
-                # Use customer data from Supabase (includes caller_language and preferred_language)
-                dynamic_variables.update(customer_data)
-                logger.info(f"Using customer data for known customer: {list(customer_data.keys())}")
+                logger.info(f"Processing inbound webhook - From: {from_number}, To: {to_number}, Agent: {agent_id}")
+                
+                # Check if caller is known (exists in caller table)
+                caller_known = False
+                if from_number:
+                    caller_resp = self.supabase.table('caller').select('id, is_customer').eq('phone_number', from_number).limit(1).execute()
+                    if caller_resp.data:
+                        caller_record = caller_resp.data[0]
+                        caller_known = caller_record.get('is_customer') == 'yes'
+                        logger.info(f"Caller found in database - known: {caller_known}")
+                    else:
+                        logger.info("Caller not found in database - will be created during call_started event")
+                
+                # Get customer data based on to_number (includes language info)
+                customer_data = self._get_customer_data(to_number)
+                # Note: customer_data is about the business/client, caller_known is about the person calling
+                
+                # Build dynamic variables
+                dynamic_variables = {}
+                if customer_data:
+                    # Use customer data from Supabase (includes caller_language and preferred_language)
+                    dynamic_variables.update(customer_data)
+                    logger.info(f"Using customer data for known customer: {list(customer_data.keys())}")
+                else:
+                    # Default variables for unknown customers
+                    dynamic_variables = {
+                        'customer_name': 'Valued Customer',
+                        'customer_id': 'unknown',
+                        'account_type': 'standard',
+                        'preferred_language': 'en',
+                        'client_name': 'Our Company'
+                    }
+                    logger.info("Using default variables for unknown customer")
+                
+                # Build metadata - focus on business value, not redundant data
+                metadata = {
+                    'inbound_timestamp': datetime.now().isoformat(),
+                    'caller_known': caller_known,  # Focus on caller recognition
+                    'phone_number_id': phone_number_id
+                }
+                
+                # Build response
+                response = {
+                    'call_inbound': {
+                        'dynamic_variables': dynamic_variables,
+                        'metadata': metadata
+                    }
+                }
+                
+                # Add agent override if customer has a preferred agent
+                if customer_data and 'preferred_agent_id' in customer_data:
+                    response['call_inbound']['override_agent_id'] = customer_data['preferred_agent_id']
+                    logger.info(f"Overriding agent to: {customer_data['preferred_agent_id']}")
+                
+                logger.info(f"Inbound webhook processed successfully. Caller known: {caller_known}")
+                return response
             else:
-                # Default variables for unknown customers
-                dynamic_variables = {
-                    'customer_name': 'Valued Customer',
-                    'customer_id': 'unknown',
-                    'account_type': 'standard',
-                    'preferred_language': 'en',
-                    'client_name': 'Our Company'
-                }
-                logger.info("Using default variables for unknown customer")
-            
-            # Build metadata
-            metadata = {
-                'inbound_timestamp': datetime.now().isoformat(),
-                'from_number': from_number,
-                'to_number': to_number,
-                'original_agent_id': agent_id,
-                'customer_known': customer_known,
-                'phone_number_id': phone_number_id
-            }
-            
-            # Build response
-            response = {
-                'call_inbound': {
-                    'dynamic_variables': dynamic_variables,
-                    'metadata': metadata
-                }
-            }
-            
-            # Add agent override if customer has a preferred agent
-            if customer_known and customer_data and 'preferred_agent_id' in customer_data:
-                response['call_inbound']['override_agent_id'] = customer_data['preferred_agent_id']
-                logger.info(f"Overriding agent to: {customer_data['preferred_agent_id']}")
-            
-            logger.info(f"Inbound webhook processed successfully. Customer known: {customer_known}")
-            return response
+                # For other events (call_started, call_ended, call_analyzed), just return success
+                logger.info(f"Processed {event_type} event successfully")
+                return {'status': 'success', 'event': event_type}
             
         except Exception as e:
             logger.error(f"Error processing inbound webhook: {e}")
@@ -524,10 +705,7 @@ class WebhookService:
                     },
                     'metadata': {
                         'inbound_timestamp': datetime.now().isoformat(),
-                        'from_number': from_number if 'from_number' in locals() else 'unknown',
-                        'to_number': to_number if 'to_number' in locals() else 'unknown',
-                        'original_agent_id': agent_id if 'agent_id' in locals() else 'unknown',
-                        'customer_known': False,
+                        'caller_known': False,
                         'error': str(e)
                     }
                 }
