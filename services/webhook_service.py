@@ -486,11 +486,9 @@ class WebhookService:
                 logger.warning("transcript_with_tool_calls is empty or None")
                 return ""
             
-            # Parse the JSON data
-            import json
-            logger.info(f"Attempting to parse transcript_with_tool_calls as JSON")
-            steps = json.loads(transcript_with_tool_calls)
-            logger.info(f"Successfully parsed JSON with {len(steps)} steps")
+            # transcript_with_tool_calls is already a Python object, not JSON string
+            steps = transcript_with_tool_calls
+            logger.info(f"Processing transcript_with_tool_calls with {len(steps)} steps")
             
             # Initialize tracking variables
             current_node = "begin"
