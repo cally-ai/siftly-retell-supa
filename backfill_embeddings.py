@@ -22,9 +22,13 @@ import os
 import time
 import math
 from typing import List
+from dotenv import load_dotenv
 from supabase import create_client
 from openai import OpenAI
-from openai.error import APIError, RateLimitError
+from openai import APIError, RateLimitError
+
+# Load environment variables from .env file
+load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "<YOUR_SUPABASE_URL>")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "<YOUR_SERVICE_ROLE_KEY>")
@@ -69,10 +73,10 @@ def update_embedding(row_id: str, vec: List[float]):
 
 def count_missing():
     """Count how many rows are missing embeddings"""
-    resp = sb.rpc("sql", {"q": "select count(*)::int as c from public.intent_example where embedding is null"}).execute()
+    resp = sb.table("intent_example").select("id", count="exact").is_("embedding", "null").execute()
     if getattr(resp, "error", None):
         raise RuntimeError(resp.error.message)
-    return resp.data[0]["c"] if resp.data else 0
+    return resp.count or 0
 
 def main():
     """Main function to process all missing embeddings"""

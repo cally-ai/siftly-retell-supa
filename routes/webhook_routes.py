@@ -141,6 +141,50 @@ def webhook_test():
         'endpoints': {
             'inbound': '/webhook/inbound (POST)',
             'business_hours': '/webhook/business-hours (POST)',
-            'test': '/webhook/test (GET)'
+            'test': '/webhook/test (GET)',
+            'function_test': '/webhook/function-test (POST)'
         }
     }), 200
+
+@webhook_bp.route('/function-test', methods=['POST'])
+def function_test_webhook():
+    """
+    Test endpoint to see Retell function call payloads
+    
+    This endpoint will log everything it receives and return a simple response.
+    Use this to debug Retell function calls.
+    """
+    try:
+        # Get request data
+        data = request.get_json()
+        
+        # Log everything we receive
+        logger.info(f"=== FUNCTION TEST WEBHOOK PAYLOAD ===")
+        logger.info(f"Full payload: {data}")
+        logger.info(f"Headers: {dict(request.headers)}")
+        logger.info(f"Content-Type: {request.content_type}")
+        logger.info(f"Method: {request.method}")
+        logger.info(f"URL: {request.url}")
+        logger.info(f"=== END FUNCTION TEST PAYLOAD ===")
+        
+        # Return a simple response
+        response_data = {
+            'status': 'function_test_received',
+            'timestamp': datetime.now().isoformat(),
+            'received_data': data,
+            'message': 'Function call payload logged successfully'
+        }
+        
+        logger.info(f"=== FUNCTION TEST RESPONSE ===")
+        logger.info(f"Response data: {response_data}")
+        logger.info(f"=== END FUNCTION TEST RESPONSE ===")
+        
+        return jsonify(response_data), 200
+        
+    except Exception as e:
+        logger.error(f"Error in function test webhook: {e}")
+        return jsonify({
+            'error': 'Internal server error in function test',
+            'timestamp': datetime.now().isoformat(),
+            'exception': str(e)
+        }), 500
