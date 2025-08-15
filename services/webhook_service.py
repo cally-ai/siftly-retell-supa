@@ -405,7 +405,7 @@ class WebhookService:
             }
             
             retell_response = self.supabase.table('retell_event').insert(retell_event_data).execute()
-            if retell_response.error:
+            if hasattr(retell_response, 'error') and retell_response.error:
                 logger.error(f"Error creating retell_event record: {retell_response.error}")
                 return
             
@@ -423,7 +423,7 @@ class WebhookService:
                 }
                 
                 twilio_response = self.supabase.table('twilio_call').insert(twilio_call_data).execute()
-                if twilio_response.error:
+                if hasattr(twilio_response, 'error') and twilio_response.error:
                     logger.error(f"Error creating twilio_call record: {twilio_response.error}")
                 else:
                     logger.info(f"Created twilio_call record with ID: {twilio_response.data[0]['id'] if twilio_response.data else 'unknown'}")
