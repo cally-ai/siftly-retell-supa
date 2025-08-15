@@ -60,7 +60,7 @@ def create_app(config_name=None):
     # TODO: Register these when implemented
     # app.register_blueprint(vapi_bp)
     # app.register_blueprint(ivr_bp)
-    # app.register_blueprint(classify_bp, url_prefix="")  # Commented out for local testing
+    app.register_blueprint(classify_bp, url_prefix="")  # Enable intent classification
     
     # Error handlers
     @app.errorhandler(404)

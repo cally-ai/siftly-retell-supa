@@ -238,14 +238,15 @@ class WebhookService:
             logger.info(f"Original number: {to_number}, Cleaned number: {cleaned_number}")
             
             # Step 1: Find client via twilio_number (try both original and cleaned)
-            tw_resp = self.supabase.table('twilio_number').select('client_id').eq('twilio_number', cleaned_number).limit(1).execute()
+            tw_resp = self.supabase.table('twilio_number').select('client_id, language_id').eq('twilio_number', cleaned_number).limit(1).execute()
             if not tw_resp.data:
                 # Fallback to original number if cleaned doesn't work
-                tw_resp = self.supabase.table('twilio_number').select('client_id').eq('twilio_number', to_number).limit(1).execute()
+                tw_resp = self.supabase.table('twilio_number').select('client_id, language_id').eq('twilio_number', to_number).limit(1).execute()
             if not tw_resp.data:
                 logger.warning(f"No twilio_number record found for: {to_number} (cleaned: {cleaned_number})")
                 return None
             client_id = tw_resp.data[0].get('client_id')
+            language_id = tw_resp.data[0].get('language_id')
             if not client_id:
                 logger.warning(f"twilio_number {to_number} has no client_id")
                 return None
@@ -257,31 +258,44 @@ class WebhookService:
             client_resp = self.supabase.table('client').select('name, client_description').eq('id', client_id).limit(1).execute()
             if client_resp.data:
                 client = client_resp.data[0]
-                dynamic_variables['company_name'] = client.get('name', 'Our Company')
-                dynamic_variables['company_name_agent'] = client.get('name', 'Our Company')
-                dynamic_variables['client_description'] = client.get('client_description', '')
+                client_name = client.get('name', 'Our Company')
+                client_description = client.get('client_description', '')
+                dynamic_variables['client_name'] = client_name
+                dynamic_variables['client_description'] = client_description
+                logger.info(f"Client data - name: '{client_name}', description: '{client_description}'")
 
             # Get client workflow configuration
             wf_resp = self.supabase.table('client_workflow_configuration').select('*').eq('client_id', client_id).limit(1).execute()
             if wf_resp.data:
                 wf_config = wf_resp.data[0]
+                logger.info(f"Workflow config raw data: {wf_config}")
                 # Add workflow configuration as dynamic variables
                 for key, value in wf_config.items():
                     if key != 'id' and key != 'client_id' and value is not None:
                         dynamic_variables[f'workflow_{key}'] = value
+                        logger.info(f"Added workflow_{key}: '{value}'")
 
             # Get client language agent names
             agent_names_resp = self.supabase.table('client_language_agent_name').select('language_id, agent_name').eq('client_id', client_id).execute()
             if agent_names_resp.data:
                 for agent_record in agent_names_resp.data:
-                    language_id = agent_record.get('language_id')
+                    agent_language_id = agent_record.get('language_id')
                     agent_name = agent_record.get('agent_name')
-                    if language_id and agent_name:
+                    if agent_language_id and agent_name:
                         # Get language code for the key
-                        lang_resp = self.supabase.table('language').select('language_code').eq('id', language_id).limit(1).execute()
+                        lang_resp = self.supabase.table('language').select('language_code').eq('id', agent_language_id).limit(1).execute()
                         if lang_resp.data:
                             lang_code = lang_resp.data[0].get('language_code', 'en')
                             dynamic_variables[f'agent_name_{lang_code}'] = agent_name
+
+            # Get caller language from the twilio_number record
+            if language_id:
+                lang_resp = self.supabase.table('language').select('language_code').eq('id', language_id).limit(1).execute()
+                if lang_resp.data:
+                    caller_language = lang_resp.data[0].get('language_code', 'en')
+                    dynamic_variables['caller_language'] = caller_language
+                    dynamic_variables['preferred_language'] = caller_language
+                    logger.info(f"Found caller language from twilio_number: {caller_language}")
 
             logger.info(f"Returning dynamic variables from Supabase: {list(dynamic_variables.keys())}")
             logger.info(f"=== SUPABASE LOOKUP END (async) ===")
@@ -371,17 +385,14 @@ class WebhookService:
             
             logger.info(f"Processing inbound webhook - From: {from_number}, To: {to_number}, Agent: {agent_id}")
             
-            # Get customer data based on to_number
+            # Get customer data based on to_number (includes language info)
             customer_data = self._get_customer_data(to_number)
             customer_known = customer_data is not None
-            
-            # Get caller language from phone_number_id
-            caller_language = self._get_caller_language_from_phone_id(phone_number_id)
             
             # Build dynamic variables
             dynamic_variables = {}
             if customer_known and customer_data:
-                # Use customer data from Supabase
+                # Use customer data from Supabase (includes caller_language and preferred_language)
                 dynamic_variables.update(customer_data)
                 logger.info(f"Using customer data for known customer: {list(customer_data.keys())}")
             else:
@@ -390,15 +401,10 @@ class WebhookService:
                     'customer_name': 'Valued Customer',
                     'customer_id': 'unknown',
                     'account_type': 'standard',
-                    'preferred_language': caller_language or 'en',
-                    'company_name': 'Our Company',
-                    'company_name_agent': 'Our Company'
+                    'preferred_language': 'en',
+                    'client_name': 'Our Company'
                 }
                 logger.info("Using default variables for unknown customer")
-            
-            # Add caller language if available
-            if caller_language:
-                dynamic_variables['caller_language'] = caller_language
             
             # Build metadata
             metadata = {
@@ -436,8 +442,7 @@ class WebhookService:
                         'customer_id': 'unknown',
                         'account_type': 'standard',
                         'preferred_language': 'en',
-                        'company_name': 'Our Company',
-                        'company_name_agent': 'Our Company'
+                        'client_name': 'Our Company'
                     },
                     'metadata': {
                         'inbound_timestamp': datetime.now().isoformat(),
