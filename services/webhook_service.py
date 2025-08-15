@@ -482,11 +482,14 @@ class WebhookService:
         """
         try:
             if not transcript_with_tool_calls:
+                logger.warning("transcript_with_tool_calls is empty or None")
                 return ""
             
             # Parse the JSON data
             import json
+            logger.info(f"Attempting to parse transcript_with_tool_calls as JSON")
             steps = json.loads(transcript_with_tool_calls)
+            logger.info(f"Successfully parsed JSON with {len(steps)} steps")
             
             # Initialize tracking variables
             current_node = "begin"
@@ -594,7 +597,11 @@ class WebhookService:
             logger.info(f"Found existing retell_event record with ID: {retell_event_id}")
             
             # Generate node transcript from transcript_with_tool_calls
+            logger.info(f"Generating node transcript - transcript_with_tool_calls length: {len(transcript_with_tool_calls) if transcript_with_tool_calls else 0}")
+            logger.info(f"transcript_with_tool_calls preview: {transcript_with_tool_calls[:200] if transcript_with_tool_calls else 'None'}")
             generated_node_transcript = self._generate_node_transcript(transcript_with_tool_calls)
+            logger.info(f"Generated node transcript length: {len(generated_node_transcript) if generated_node_transcript else 0}")
+            logger.info(f"Generated node transcript preview: {generated_node_transcript[:200] if generated_node_transcript else 'None'}")
             
             # Update retell_event record with call_ended data
             update_data = {
@@ -657,6 +664,7 @@ class WebhookService:
             
             # Update retell_event record with call_analysis data
             update_data = {
+                'call_status': 'analyzed',  # Update call status to analyzed
                 'call_summary': call_summary,
                 'in_voicemail': in_voicemail,
                 'user_sentiment': user_sentiment,
@@ -730,6 +738,7 @@ class WebhookService:
                 'call_status': call_status,
                 'from_number': from_number,
                 'to_number': to_number,
+                'direction': direction,  # Add direction field
                 'retell_llm_dynamic_variables': retell_llm_dynamic_variables
             }
             
