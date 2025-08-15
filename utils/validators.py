@@ -21,16 +21,16 @@ def validate_retell_inbound_webhook(data: Dict[str, Any]) -> None:
     if 'event' not in data:
         raise ValueError("Missing required field: event")
     
-    # Accept both call_inbound and call_started events
-    if data['event'] not in ['call_inbound', 'call_started']:
-        raise ValueError("Event must be 'call_inbound' or 'call_started'")
+    # Accept all Retell call lifecycle events
+    if data['event'] not in ['call_inbound', 'call_started', 'call_ended', 'call_analyzed']:
+        raise ValueError("Event must be 'call_inbound', 'call_started', 'call_ended', or 'call_analyzed'")
     
     # Handle different payload structures
     if data['event'] == 'call_inbound':
         if 'call_inbound' not in data:
             raise ValueError("Missing required field: call_inbound")
         inbound_data = data['call_inbound']
-    elif data['event'] == 'call_started':
+    elif data['event'] in ['call_started', 'call_ended', 'call_analyzed']:
         if 'call' not in data:
             raise ValueError("Missing required field: call")
         inbound_data = data['call']
