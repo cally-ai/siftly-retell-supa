@@ -466,6 +466,96 @@ class WebhookService:
         except Exception as e:
             logger.error(f"Error fetching/updating Twilio call details: {e}")
 
+    def _generate_node_transcript(self, transcript_with_tool_calls: str) -> str:
+        """
+        Generate a node-based transcript from transcript_with_tool_calls data
+        
+        Args:
+            transcript_with_tool_calls: The raw transcript with tool calls from Retell AI
+            
+        Returns:
+            Formatted node transcript string
+        """
+        try:
+            if not transcript_with_tool_calls:
+                return ""
+            
+            # Parse the JSON data
+            import json
+            steps = json.loads(transcript_with_tool_calls)
+            
+            # Initialize tracking variables
+            current_node = "begin"
+            node_start = None
+            node_end = None
+            buffer = []
+            node_transcript_parts = []
+            
+            for step in steps:
+                step_type = step.get('type', '')
+                
+                # Handle node transitions
+                if step_type == "node_transition":
+                    # Finalize current node if we have content
+                    if buffer and node_start is not None:
+                        node_summary = f"[Node: {current_node}] (Start: {node_start:.4f}s - End: {node_end:.4f}s)\n" + "\n".join(buffer)
+                        node_transcript_parts.append(node_summary)
+                    
+                    # Start new node
+                    current_node = step.get('new_node_name', 'unknown')
+                    node_start = None
+                    node_end = None
+                    buffer = []
+                
+                # Handle agent speech
+                elif step_type == "agent" and step.get('words'):
+                    words = step.get('words', [])
+                    if words:
+                        first = words[0]
+                        last = words[-1]
+                        node_start = node_start or first.get('start', 0)
+                        node_end = last.get('end', 0)
+                        buffer.append(f'Agent: "{step.get("content", "")}"')
+                
+                # Handle user speech
+                elif step_type == "user" and step.get('words'):
+                    words = step.get('words', [])
+                    if words:
+                        first = words[0]
+                        last = words[-1]
+                        node_start = node_start or first.get('start', 0)
+                        node_end = last.get('end', 0)
+                        buffer.append(f'User: "{step.get("content", "")}"')
+                
+                # Handle DTMF (touch-tone)
+                elif step_type == "dtmf":
+                    buffer.append(f'User: Pressed DTMF "{step.get("digit", "")}"')
+                
+                # Handle tool calls
+                elif step_type == "tool_call_invocation":
+                    tool_name = step.get('tool_name', '')
+                    if tool_name == "extract_dynamic_variables":
+                        buffer.append("System: Detected language as Dutch")
+                    elif tool_name == "agent_swap":
+                        agent_id = step.get('agent_id', 'unknown')
+                        buffer.append(f"System: Swapped to Dutch agent ({agent_id})")
+                    else:
+                        buffer.append(f"System: Executed tool {tool_name}")
+            
+            # Finalize the last node
+            if buffer and node_start is not None:
+                node_summary = f"[Node: {current_node}] (Start: {node_start:.4f}s - End: {node_end:.4f}s)\n" + "\n".join(buffer)
+                node_transcript_parts.append(node_summary)
+            
+            # Join all node parts
+            node_transcript = "\n\n".join(node_transcript_parts)
+            logger.info(f"Generated node transcript with {len(node_transcript_parts)} nodes")
+            return node_transcript
+            
+        except Exception as e:
+            logger.error(f"Error generating node transcript: {e}")
+            return ""
+
     def _handle_call_ended_event(self, data: Dict[str, Any]) -> None:
         """
         Handle call_ended events by updating existing retell_event record
@@ -499,6 +589,9 @@ class WebhookService:
             retell_event_id = retell_resp.data[0]['id']
             logger.info(f"Found existing retell_event record with ID: {retell_event_id}")
             
+            # Generate node transcript from transcript_with_tool_calls
+            generated_node_transcript = self._generate_node_transcript(transcript_with_tool_calls)
+            
             # Update retell_event record with call_ended data
             update_data = {
                 'call_status': call_status,
@@ -507,7 +600,7 @@ class WebhookService:
                 'transcript': transcript,
                 'transcript_object': transcript_object,
                 'transcript_with_tool_calls': transcript_with_tool_calls,
-                'node_transcript': node_transcript,
+                'node_transcript': generated_node_transcript,
                 'recording_url': recording_url,
                 'opt_out_sensitive_data_storage': opt_out_sensitive_data_storage
             }
