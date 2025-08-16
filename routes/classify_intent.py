@@ -316,6 +316,8 @@ REQUIRED JSON SCHEMA:
         try:
             # First try to parse as-is
             parsed = json.loads(content)
+            # Extract explanation from the JSON response
+            explanation = parsed.get("explanation", "")
         except json.JSONDecodeError:
             # If that fails, try to find the JSON object in the response
             import re
@@ -323,17 +325,20 @@ REQUIRED JSON SCHEMA:
             if json_match:
                 json_str = json_match.group(0)
                 parsed = json.loads(json_str)
+                # Extract explanation from the JSON response
+                explanation = parsed.get("explanation", "")
                 
-                # Extract explanation from the remaining text
-                remaining_text = content[json_match.end():].strip()
-                if remaining_text:
-                    # Look for explanation patterns
-                    explanation_match = re.search(r'explanation[:\s]*["\']?([^"\']+)["\']?', remaining_text, re.IGNORECASE)
-                    if explanation_match:
-                        explanation = explanation_match.group(1).strip()
-                    else:
-                        # If no specific explanation pattern, take the first sentence
-                        explanation = remaining_text.split('.')[0].strip()
+                # If no explanation in JSON, try to extract from remaining text
+                if not explanation:
+                    remaining_text = content[json_match.end():].strip()
+                    if remaining_text:
+                        # Look for explanation patterns
+                        explanation_match = re.search(r'explanation[:\s]*["\']?([^"\']+)["\']?', remaining_text, re.IGNORECASE)
+                        if explanation_match:
+                            explanation = explanation_match.group(1).strip()
+                        else:
+                            # If no specific explanation pattern, take the first sentence
+                            explanation = remaining_text.split('.')[0].strip()
             else:
                 # Handle plain text format (new OpenRouter format)
                 # Example: "Intent: [id] name\ndescription\nneeds_clarification=false"
