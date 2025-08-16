@@ -271,7 +271,18 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
     t0 = time.time()
     
     # Debug logging for OpenRouter request
-    system_message = "You are a call intent classifier. Choose exactly one best intent from the candidate list. If uncertain, set needs_clarification=true and output ONE short question." + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")
+    system_message = """You are a call intent classifier. Return ONLY a single JSON object. No markdown. No code fences. No explanations outside JSON.
+
+Choose exactly one best intent from the candidate list. If uncertain, set needs_clarification=true and output ONE short question.
+
+REQUIRED JSON SCHEMA:
+{
+  "intent": "<intent_id_from_candidate_list>",
+  "confidence": <number_between_0_and_1>,
+  "needs_clarification": <boolean>,
+  "clarifying_question": "<question_or_null>",
+  "explanation": "<short_explanation_of_reasoning>"
+}""" + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")
     user_message = f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'
     
     print(f"=== OPENROUTER REQUEST ===")
@@ -285,8 +296,8 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
         resp = get_or_client().chat.completions.create(
             model=CLASSIFY_MODEL,
             messages=[
-                {"role": "system", "content": "You are a call intent classifier. Choose exactly one best intent from the candidate list. If uncertain, set needs_clarification=true and output ONE short question." + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")},
-                {"role": "user", "content": f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'}
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message}
             ],
             response_format={"type": "json_schema", "json_schema": schema}
         )
@@ -358,6 +369,15 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
                     }
                 else:
                     raise ValueError("Could not extract valid JSON or text format from response")
+        
+        # Validate intent ID format
+        intent_id = parsed.get("intent", "")
+        if intent_id and not re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', intent_id, re.IGNORECASE):
+            print(f"WARNING: Invalid intent format: {intent_id}")
+            # If intent is invalid, set needs_clarification to true
+            parsed["intent"] = ""
+            parsed["needs_clarification"] = True
+            parsed["clarifying_question"] = "I'm having trouble understanding. Could you please repeat that?"
         
         # Map the response to our expected format
         needs_clarification_value = parsed.get("needs_clarification", False)
