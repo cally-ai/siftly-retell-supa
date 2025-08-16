@@ -392,6 +392,10 @@ def classify_intent():
         best_row = next((i for i in intents if i["id"] == best_id), intents[0] if intents else None)
         category = load_category(best_row.get("category_id") if best_row else None)
         routing = effective_policy(best_row or {}, category)
+        
+        needs = bool(cls.get("needs_clarification"))
+        if needs:
+            routing = None  # Hide routing until intent is clarified
 
         # 6) Log (rich but safe)
         call_id = _resolve_call_id(provided_call_id, retell_event_id)
@@ -425,9 +429,9 @@ def classify_intent():
             "intent_id": (best_row or {}).get("id"),
             "intent_name": (best_row or {}).get("name"),
             "confidence": cls.get("confidence"),
-            "needs_clarification": bool(cls.get("needs_clarification")),
-            "clarify_question": clarify_q if cls.get("needs_clarification") else "",
-            "routing": routing,
+            "needs_clarification": needs,
+            "clarify_question": clarify_q if needs else "",
+            "routing": routing,  # Will be null (None) if needs is True
             "telemetry": {
                 "embedding_top1_sim": (top[0]["similarity"] if top else None),
                 "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
