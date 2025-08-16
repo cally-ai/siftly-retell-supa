@@ -15,6 +15,7 @@ print(f"TWILIO_AUTH_TOKEN: {os.getenv('TWILIO_AUTH_TOKEN', 'NOT SET')}")
 print(f"TWILIO_PHONE_NUMBER: {os.getenv('TWILIO_PHONE_NUMBER', 'NOT SET')}")
 print(f"APP_BASE_URL: {os.getenv('APP_BASE_URL', 'https://siftly.onrender.com')}")
 print(f"OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY', 'NOT SET')}")
+print(f"OPENROUTER_API_KEY: {os.getenv('OPENROUTER_API_KEY', 'NOT SET')}")
 print(f"DEEPGRAM_API_KEY: {os.getenv('DEEPGRAM_API_KEY', 'NOT SET')}")
 print(f"SUPABASE_URL: {os.getenv('SUPABASE_URL', 'NOT SET')}")
 print(f"SUPABASE_SERVICE_ROLE_KEY: {os.getenv('SUPABASE_SERVICE_ROLE_KEY', 'NOT SET')}")
@@ -43,6 +44,9 @@ class Config:
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    
+    # OpenRouter Configuration
+    OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
     
     # Deepgram Configuration
     DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
