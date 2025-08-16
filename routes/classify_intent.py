@@ -561,9 +561,40 @@ def classify_intent():
         print(f"Top K results: {top}")
         print(f"=== END NO MATCHING INTENTS ===")
         
+        # Log unmatched intent to call_reason_log for analysis
+        call_id = _resolve_call_id(provided_call_id, retell_event_id)
+        try:
+            get_supabase_client().table("call_reason_log").insert({
+                "client_id": client_id,
+                "call_id": call_id,
+                "primary_intent_id": None,  # No intent found
+                "confidence": 0.0,
+                "embedding_top1_sim": None,
+                "alternatives": [],
+                "clarifications_json": [],
+                "llm_model": None,
+                "embedding_model": emb_model,
+                "llm_latency_ms": None,
+                "embed_latency_ms": embed_ms,
+                "openrouter_request_id": None,
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "router_version": "v1",
+                "utterance": _redact_pii(context_text),
+                "detected_lang": (caller_language.lower() or None),
+                "utterance_en": _redact_pii(ctx_en),
+                "explanation": "No matching intents found in database - needs new intent creation",
+                "unmatched_intent": True,  # Flag for unmatched intents
+                "top_k_results": top,  # Log the vector search results for analysis
+                "query_text": _redact_pii(query_en or ctx_en)  # Log the query that failed to match
+            }).execute()
+            print(f"Logged unmatched intent to call_reason_log for call_id: {call_id}")
+        except Exception as e:
+            print(f"Failed to log unmatched intent: {e}")
+        
         # Return a fallback response for unmatched intents
         return jsonify({
-            "call_id": _resolve_call_id(provided_call_id, retell_event_id),
+            "call_id": call_id,
             "intent_id": None,
             "intent_name": "Unmatched Intent",
             "confidence": 0.0,
