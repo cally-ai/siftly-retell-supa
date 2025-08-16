@@ -323,22 +323,29 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
                     
                     # Extract needs_clarification
                     clarification_match = re.search(r'needs_clarification\s*=\s*(true|false)', content, re.IGNORECASE)
-                    needs_clarification = clarification_match.group(1).lower() == 'true' if clarification_match else False
+                    needs_clarification_text = clarification_match.group(1).lower() if clarification_match else "false"
                     
                     parsed = {
                         "intent": intent_id,
                         "confidence": 0.9,  # Default confidence for text format
-                        "needs_clarification": needs_clarification,
+                        "needs_clarification": needs_clarification_text,  # Keep as text
                         "clarifying_question": ""
                     }
                 else:
                     raise ValueError("Could not extract valid JSON or text format from response")
         
         # Map the response to our expected format
+        needs_clarification_value = parsed.get("needs_clarification", False)
+        # Convert text "true"/"false" to boolean if needed
+        if isinstance(needs_clarification_value, str):
+            needs_clarification_bool = needs_clarification_value.lower() == "true"
+        else:
+            needs_clarification_bool = bool(needs_clarification_value)
+            
         result = {
             "best_intent_id": parsed.get("intent") or parsed.get("best_intent_id") or "",
             "confidence": parsed.get("confidence", 0.5),
-            "needs_clarification": parsed.get("needs_clarification", False),
+            "needs_clarification": needs_clarification_bool,  # Convert to boolean for the result
             "clarify_question": parsed.get("clarifying_question") or parsed.get("clarify_question") or "",
             "alternatives": parsed.get("alternatives", []),
             "explanation": explanation,  # Add the explanation
