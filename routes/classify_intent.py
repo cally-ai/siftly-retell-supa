@@ -340,11 +340,9 @@ def classify_intent():
       "confidence": 0.85,
       "needs_clarification": false,
       "clarify_question": "",
-      "routing": {
-        "action_policy": "ask_urgency_then_collect",
-        "transfer_number": "+1234567890",
-        "category_name": "Appointments"
-      },
+      "action_policy": "ask_urgency_then_collect",
+      "transfer_number": "+1234567890",
+      "category_name": "Appointments",
       "telemetry": {
         "embedding_top1_sim": 0.92,
         "topK": [...]
@@ -459,10 +457,17 @@ def classify_intent():
             "confidence": cls.get("confidence"),
             "needs_clarification": needs,
             "clarify_question": clarify_q if needs else "",
-            "routing": routing,  # Will be null (None) if needs is True
             "telemetry": {
                 "embedding_top1_sim": (top[0]["similarity"] if top else None),
                 "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
             }
         }
+        
+        # Add routing fields at top level (if not needs clarification)
+        if routing and not needs:
+            result_obj.update({
+                "action_policy": routing.get("action_policy"),
+                "transfer_number": routing.get("transfer_number"),
+                "category_name": routing.get("category_name")
+            })
         return jsonify(result_obj)
