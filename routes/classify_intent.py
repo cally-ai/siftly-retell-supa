@@ -39,18 +39,93 @@ def get_or_client() -> OpenAI:
     return _or_client
 
 # --- Helpers ---
-def _extract_user_context(conversation: str, max_lines: int = 50) -> str:
-    if not conversation: return ""
+ACK_REGEX = re.compile(
+    r'^(?:y|yes|yeah|yep|yup|sure|okay|ok|affirmative|correct|that\'s right|no|nope|nah)\W*$',
+    flags=re.I
+)
+
+def _normalize_convo_lines(conversation: str) -> list[tuple[str, str]]:
+    if not conversation:
+        return []
     lines = [l.strip() for l in conversation.splitlines() if l.strip()]
-    if not lines: return ""
-    
-    if len(lines) <= max_lines:
-        return "\n".join(lines)
-    
-    # If line count > max_lines, return first 15 lines, then "...", then last (max_lines - 15) lines
-    first_lines = lines[:15]
-    last_lines = lines[-(max_lines - 15):]
-    return "\n".join(first_lines) + "\n..." + "\n".join(last_lines)
+    out: list[tuple[str, str]] = []
+    for l in lines:
+        m = re.match(r"^(User|Caller|Customer|Agent|System)\s*[:\-]\s*(.*)$", l, flags=re.I)
+        if m:
+            role = m.group(1).lower()
+            text = (m.group(2) or "").strip()
+        else:
+            role, text = "user", l
+        out.append((role, text))
+    return out
+
+def _extract_user_context(conversation: str, max_lines: int = 50) -> str:
+    """
+    If transcript <= max_lines, return all lines.
+    Else return first 15 + '...' + last (max_lines-15) lines.
+    """
+    if not conversation:
+        return ""
+    lines = [l.strip() for l in conversation.splitlines() if l.strip()]
+    n = len(lines)
+    if n <= max_lines:
+        selected = lines
+    else:
+        head = lines[:15]
+        tail = lines[-(max_lines - 15):]
+        selected = head + ["… [context gap] …"] + tail
+    return "\n".join(selected)
+
+def _extract_embedding_query(conversation: str) -> str:
+    """
+    Returns the best text to embed for retrieval:
+      - Prefer the last USER turn if it's substantive.
+      - If the last USER turn is an acknowledgement (yes/no/ok) or too short,
+        prepend the immediately preceding AGENT question/utterance.
+      - Fallback gracefully to the last non-empty line.
+    """
+    parsed = _normalize_convo_lines(conversation)
+    if not parsed:
+        return ""
+
+    # Find last user turn
+    last_user_idx = None
+    for i in range(len(parsed) - 1, -1, -1):
+        if parsed[i][0] in ("user", "caller", "customer"):
+            last_user_idx = i
+            break
+
+    if last_user_idx is None:
+        # No explicit user role; embed the last line text
+        return parsed[-1][1]
+
+    last_user_text = parsed[last_user_idx][1]
+    is_ack = bool(ACK_REGEX.match(last_user_text)) or len(last_user_text.split()) <= 2
+
+    if not is_ack:
+        # Substantive final user text — use it as-is
+        return last_user_text
+
+    # Ack: try to prepend the prior agent line to give meaning
+    # (e.g., "Agent: Do you want to reschedule?" + "User: Yes")
+    prev_agent_text = None
+    for j in range(last_user_idx - 1, -1, -1):
+        if parsed[j][0] == "agent":
+            prev_agent_text = parsed[j][1]
+            break
+
+    if prev_agent_text:
+        return f"Agent: {prev_agent_text}\nUser: {last_user_text}"
+
+    # If no agent line found, try previous substantive user line
+    for k in range(last_user_idx - 1, -1, -1):
+        if parsed[k][0] in ("user", "caller", "customer"):
+            prior_user = parsed[k][1]
+            if prior_user and len(prior_user.split()) >= 3:
+                return f"{prior_user}\n{last_user_text}"
+
+    # Absolute fallback
+    return last_user_text
 
 def _redact_pii(s: str) -> str:
     if not s: return s
@@ -261,41 +336,47 @@ def classify_intent():
             results.append({"toolCallId": tool_id, "result": f"Missing required fields: {', '.join(missing)}"})
             continue
 
-        # 1) User context
-        user_text = _extract_user_context(conversation, max_lines=50)
-        if not user_text:
+        # 1) Build context + embedding query
+        context_text = _extract_user_context(conversation, max_lines=50)   # for LLM classification
+        embed_query  = _extract_embedding_query(conversation)              # for vector search
+
+        if not context_text and not embed_query:
             results.append({"toolCallId": tool_id, "result": "Conversation missing user content"})
             continue
 
-        # 2) Decide language & translate only if not English
-        # Prefer explicit caller_language from Retell; else heuristic
+        # 2) Decide language based on whichever string is available (prefer embed_query)
+        sample_for_lang = (embed_query or context_text or "")
         if caller_language:
             c_low = caller_language.lower()
             is_english = (c_low == "en") or c_low.startswith("en-")
         else:
-            detected_lang = _detect_language_simple(user_text)
+            detected_lang = _detect_language_simple(sample_for_lang)
             caller_language = detected_lang
             is_english = detected_lang == "en"
 
-        # Translate only when not English
+        # Translate ONLY when not English
         if is_english:
-            utter_en, _translate_ms = user_text, 0
+            ctx_en   = context_text
+            query_en = embed_query
+            _translate_ms = 0
         else:
-            utter_en, _translate_ms = translate_to_english(user_text)
+            ctx_en, t1 = translate_to_english(context_text)
+            query_en, t2 = translate_to_english(embed_query)
+            _translate_ms = max(t1, t2)  # keep one latency figure if you log it
 
         # Language for clarifying question
         target_lang = normalize_target_language(caller_language)
 
-        # 3) Embed + shortlist
-        vec, embed_ms, emb_model = embed_english(utter_en)
+        # 3) Embed + shortlist (use sharp query text)
+        vec, embed_ms, emb_model = embed_english(query_en or ctx_en or "")
         top = match_topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
         intent_ids = [t["intent_id"] for t in top]
         intents = load_intents(intent_ids)
         candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
                       for t in top for i in intents if i["id"] == t["intent_id"]]
 
-        # 4) Classify (JSON schema)
-        cls = classify_with_openrouter(utter_en, candidates, target_lang)
+        # 4) Classify (use richer context)
+        cls = classify_with_openrouter(ctx_en or query_en or "", candidates, target_lang)
 
         # Clarifier override (if curated)
         clarify_q = cls.get("clarify_question") or ""
@@ -331,9 +412,9 @@ def classify_intent():
                 "prompt_tokens": cls.get("prompt_tokens"),
                 "completion_tokens": cls.get("completion_tokens"),
                 "router_version": "v1",
-                "utterance": _redact_pii(user_text),
+                "utterance": _redact_pii(context_text),
                 "detected_lang": (caller_language.lower() or None),
-                "utterance_en": _redact_pii(utter_en)
+                "utterance_en": _redact_pii(ctx_en)
             }).execute()
         except Exception:
             pass
