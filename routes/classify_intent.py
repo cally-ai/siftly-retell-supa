@@ -360,114 +360,114 @@ def classify_intent():
     provided_call_id = args.get("call_id") or ""
     caller_language  = args.get("caller_language") or ""
 
-        # 1) Build context + embedding query
-        context_text = _extract_user_context(conversation, max_lines=50)   # for LLM classification
-        embed_query  = _extract_embedding_query(conversation)              # for vector search
+    # 1) Build context + embedding query
+    context_text = _extract_user_context(conversation, max_lines=50)   # for LLM classification
+    embed_query  = _extract_embedding_query(conversation)              # for vector search
 
-        if not context_text and not embed_query:
-            return jsonify({"error": "Conversation missing user content"}), 400
+    if not context_text and not embed_query:
+        return jsonify({"error": "Conversation missing user content"}), 400
 
-        # 2) Decide language based on whichever string is available (prefer embed_query)
-        sample_for_lang = (embed_query or context_text or "")
-        if caller_language:
-            c_low = caller_language.lower()
-            is_english = (c_low == "en") or c_low.startswith("en-")
-        else:
-            detected_lang = _detect_language_simple(sample_for_lang)
-            caller_language = detected_lang
-            is_english = detected_lang == "en"
+    # 2) Decide language based on whichever string is available (prefer embed_query)
+    sample_for_lang = (embed_query or context_text or "")
+    if caller_language:
+        c_low = caller_language.lower()
+        is_english = (c_low == "en") or c_low.startswith("en-")
+    else:
+        detected_lang = _detect_language_simple(sample_for_lang)
+        caller_language = detected_lang
+        is_english = detected_lang == "en"
 
-        # Translate ONLY when not English
-        if is_english:
-            ctx_en   = context_text
-            query_en = embed_query
-            _translate_ms = 0
-        else:
-            ctx_en, t1 = translate_to_english(context_text)
-            query_en, t2 = translate_to_english(embed_query)
-            _translate_ms = max(t1, t2)  # keep one latency figure if you log it
+    # Translate ONLY when not English
+    if is_english:
+        ctx_en   = context_text
+        query_en = embed_query
+        _translate_ms = 0
+    else:
+        ctx_en, t1 = translate_to_english(context_text)
+        query_en, t2 = translate_to_english(embed_query)
+        _translate_ms = max(t1, t2)  # keep one latency figure if you log it
 
-        # Language for clarifying question
-        target_lang = normalize_target_language(caller_language)
+    # Language for clarifying question
+    target_lang = normalize_target_language(caller_language)
 
-        # 3) Embed + shortlist (use sharp query text)
-        if not (query_en or ctx_en):
-            return jsonify({"error": "No usable text to embed/classify"}), 400
-            
-        vec, embed_ms, emb_model = embed_english(query_en or ctx_en or "")
-        top = match_topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
-        intent_ids = [t["intent_id"] for t in top]
-        intents = load_intents(intent_ids)
-        candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
-                      for t in top for i in intents if i["id"] == t["intent_id"]]
-
-        # 4) Classify (use richer context)
-        cls = classify_with_openrouter(ctx_en or query_en or "", candidates, target_lang)
-
-        # Clarifier override (if curated)
-        clarify_q = cls.get("clarify_question") or ""
-        if cls.get("needs_clarification") and len(candidates) >= 2:
-            a = cls.get("best_intent_id") or candidates[0]["id"]
-            b = next((c["id"] for c in candidates if c["id"] != a), None)
-            if b:
-                curated = get_curated_clarifier(a, b)
-                if curated: clarify_q = curated
-
-        # 5) Effective routing
-        best_id = cls.get("best_intent_id") or (candidates[0]["id"] if candidates else None)
-        best_row = next((i for i in intents if i["id"] == best_id), intents[0] if intents else None)
-        category = load_category(best_row.get("category_id") if best_row else None)
-        routing = effective_policy(best_row or {}, category)
+    # 3) Embed + shortlist (use sharp query text)
+    if not (query_en or ctx_en):
+        return jsonify({"error": "No usable text to embed/classify"}), 400
         
-        needs = bool(cls.get("needs_clarification"))
-        if needs:
-            routing = None  # Hide routing until intent is clarified
+    vec, embed_ms, emb_model = embed_english(query_en or ctx_en or "")
+    top = match_topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
+    intent_ids = [t["intent_id"] for t in top]
+    intents = load_intents(intent_ids)
+    candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
+                  for t in top for i in intents if i["id"] == t["intent_id"]]
 
-        # 6) Log (rich but safe)
-        call_id = _resolve_call_id(provided_call_id, retell_event_id)
-        try:
-            get_supabase_client().table("call_reason_log").insert({
-                "client_id": client_id,
-                "call_id": call_id,
-                "primary_intent_id": (best_row or {}).get("id"),
-                "confidence": cls.get("confidence"),
-                "embedding_top1_sim": (top[0]["similarity"] if top else None),
-                "alternatives": (cls.get("alternatives") or [])[:3],
-                "clarifications_json": [{"asked": bool(clarify_q)}] if cls.get("needs_clarification") else [],
-                "llm_model": cls.get("model"),
-                "embedding_model": emb_model,
-                "llm_latency_ms": cls.get("latency_ms"),
-                "embed_latency_ms": embed_ms,
-                "openrouter_request_id": cls.get("request_id"),
-                "prompt_tokens": cls.get("prompt_tokens"),
-                "completion_tokens": cls.get("completion_tokens"),
-                "router_version": "v1",
-                "utterance": _redact_pii(context_text),
-                "detected_lang": (caller_language.lower() or None),
-                "utterance_en": _redact_pii(ctx_en)
-            }).execute()
-        except Exception:
-            pass
+    # 4) Classify (use richer context)
+    cls = classify_with_openrouter(ctx_en or query_en or "", candidates, target_lang)
 
-        # 7) Build result (must be STRING)
-        result_obj = {
+    # Clarifier override (if curated)
+    clarify_q = cls.get("clarify_question") or ""
+    if cls.get("needs_clarification") and len(candidates) >= 2:
+        a = cls.get("best_intent_id") or candidates[0]["id"]
+        b = next((c["id"] for c in candidates if c["id"] != a), None)
+        if b:
+            curated = get_curated_clarifier(a, b)
+            if curated: clarify_q = curated
+
+    # 5) Effective routing
+    best_id = cls.get("best_intent_id") or (candidates[0]["id"] if candidates else None)
+    best_row = next((i for i in intents if i["id"] == best_id), intents[0] if intents else None)
+    category = load_category(best_row.get("category_id") if best_row else None)
+    routing = effective_policy(best_row or {}, category)
+    
+    needs = bool(cls.get("needs_clarification"))
+    if needs:
+        routing = None  # Hide routing until intent is clarified
+
+    # 6) Log (rich but safe)
+    call_id = _resolve_call_id(provided_call_id, retell_event_id)
+    try:
+        get_supabase_client().table("call_reason_log").insert({
+            "client_id": client_id,
             "call_id": call_id,
-            "intent_id": (best_row or {}).get("id"),
-            "intent_name": (best_row or {}).get("name"),
+            "primary_intent_id": (best_row or {}).get("id"),
             "confidence": cls.get("confidence"),
-            "needs_clarification": needs,
-            "clarify_question": clarify_q if needs else "",
-            "telemetry": {
-                "embedding_top1_sim": (top[0]["similarity"] if top else None),
-                "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
-            }
+            "embedding_top1_sim": (top[0]["similarity"] if top else None),
+            "alternatives": (cls.get("alternatives") or [])[:3],
+            "clarifications_json": [{"asked": bool(clarify_q)}] if cls.get("needs_clarification") else [],
+            "llm_model": cls.get("model"),
+            "embedding_model": emb_model,
+            "llm_latency_ms": cls.get("latency_ms"),
+            "embed_latency_ms": embed_ms,
+            "openrouter_request_id": cls.get("request_id"),
+            "prompt_tokens": cls.get("prompt_tokens"),
+            "completion_tokens": cls.get("completion_tokens"),
+            "router_version": "v1",
+            "utterance": _redact_pii(context_text),
+            "detected_lang": (caller_language.lower() or None),
+            "utterance_en": _redact_pii(ctx_en)
+        }).execute()
+    except Exception:
+        pass
+
+    # 7) Build result (must be STRING)
+    result_obj = {
+        "call_id": call_id,
+        "intent_id": (best_row or {}).get("id"),
+        "intent_name": (best_row or {}).get("name"),
+        "confidence": cls.get("confidence"),
+        "needs_clarification": needs,
+        "clarify_question": clarify_q if needs else "",
+        "telemetry": {
+            "embedding_top1_sim": (top[0]["similarity"] if top else None),
+            "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
         }
-        
-        # Add routing fields at top level (if not needs clarification)
-        if routing and not needs:
-            result_obj.update({
-                "action_policy": routing.get("action_policy"),
-                "transfer_number": routing.get("transfer_number"),
-                "category_name": routing.get("category_name")
-            })
-        return jsonify(result_obj)
+    }
+    
+    # Add routing fields at top level (if not needs clarification)
+    if routing and not needs:
+        result_obj.update({
+            "action_policy": routing.get("action_policy"),
+            "transfer_number": routing.get("transfer_number"),
+            "category_name": routing.get("category_name")
+        })
+    return jsonify(result_obj)
