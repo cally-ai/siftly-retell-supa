@@ -39,12 +39,18 @@ def get_or_client() -> OpenAI:
     return _or_client
 
 # --- Helpers ---
-def _extract_last_user_text(conversation: str) -> str:
+def _extract_user_context(conversation: str, max_lines: int = 50) -> str:
     if not conversation: return ""
     lines = [l.strip() for l in conversation.splitlines() if l.strip()]
     if not lines: return ""
-    last = lines[-1]
-    return re.sub(r"^(User|Caller|Customer|Agent|System)\s*[:\-]\s*", "", last, flags=re.I)
+    
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    
+    # If line count > max_lines, return first 15 lines, then "...", then last (max_lines - 15) lines
+    first_lines = lines[:15]
+    last_lines = lines[-(max_lines - 15):]
+    return "\n".join(first_lines) + "\n..." + "\n".join(last_lines)
 
 def _redact_pii(s: str) -> str:
     if not s: return s
@@ -255,8 +261,8 @@ def classify_intent():
             results.append({"toolCallId": tool_id, "result": f"Missing required fields: {', '.join(missing)}"})
             continue
 
-        # 1) Last user text
-        user_text = _extract_last_user_text(conversation)
+        # 1) User context
+        user_text = _extract_user_context(conversation, max_lines=50)
         if not user_text:
             results.append({"toolCallId": tool_id, "result": "Conversation missing user content"})
             continue
