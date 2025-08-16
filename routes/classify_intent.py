@@ -320,7 +320,6 @@ REQUIRED JSON SCHEMA:
             explanation = parsed.get("explanation", "")
         except json.JSONDecodeError:
             # If that fails, try to find the JSON object in the response
-            import re
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
