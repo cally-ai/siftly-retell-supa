@@ -314,11 +314,10 @@ def classify_intent():
     message = body.get("message") or {}
     tool_calls: List[Dict[str, Any]] = message.get("toolCallList") or []
 
-    results: List[Dict[str, Any]] = []
+    final_result: Optional[Dict[str, Any]] = None
 
     if not tool_calls:
-        results.append({"toolCallId": "call_id", "result": "No toolCallList in payload"})
-        return jsonify({"results": results}), 400
+        return jsonify({"error": "No toolCallList in payload"}), 400
 
     for tc in tool_calls:
         tool_id = (tc.get("id") or "").strip() or "call_id"
@@ -333,16 +332,14 @@ def classify_intent():
         # Validate
         missing = [k for k in ["client_id", "conversation", "retell_event_id"] if not args.get(k)]
         if missing:
-            results.append({"toolCallId": tool_id, "result": f"Missing required fields: {', '.join(missing)}"})
-            continue
+            return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
 
         # 1) Build context + embedding query
         context_text = _extract_user_context(conversation, max_lines=50)   # for LLM classification
         embed_query  = _extract_embedding_query(conversation)              # for vector search
 
         if not context_text and not embed_query:
-            results.append({"toolCallId": tool_id, "result": "Conversation missing user content"})
-            continue
+            return jsonify({"error": "Conversation missing user content"}), 400
 
         # 2) Decide language based on whichever string is available (prefer embed_query)
         sample_for_lang = (embed_query or context_text or "")
@@ -437,6 +434,6 @@ def classify_intent():
                 "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
             }
         }
-        results.append({"toolCallId": tool_id, "result": _json_string(result_obj)})
+        final_result = result_obj
 
-    return jsonify({"results": results})
+    return jsonify(final_result)
