@@ -299,7 +299,40 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
                         # If no specific explanation pattern, take the first sentence
                         explanation = remaining_text.split('.')[0].strip()
             else:
-                raise ValueError("Could not extract valid JSON from response")
+                # Handle plain text format (new OpenRouter format)
+                # Example: "Intent: [id] name\ndescription\nneeds_clarification=false"
+                intent_match = re.search(r'Intent:\s*\[([^\]]+)\]\s*([^\n]+)', content, re.IGNORECASE)
+                if intent_match:
+                    intent_id = intent_match.group(1).strip()
+                    intent_name = intent_match.group(2).strip()
+                    
+                    # Extract explanation (everything between intent name and needs_clarification)
+                    lines = content.split('\n')
+                    explanation_lines = []
+                    in_explanation = False
+                    
+                    for line in lines:
+                        if 'needs_clarification=' in line:
+                            break
+                        if in_explanation:
+                            explanation_lines.append(line.strip())
+                        elif intent_name in line:
+                            in_explanation = True
+                    
+                    explanation = ' '.join(explanation_lines).strip()
+                    
+                    # Extract needs_clarification
+                    clarification_match = re.search(r'needs_clarification\s*=\s*(true|false)', content, re.IGNORECASE)
+                    needs_clarification = clarification_match.group(1).lower() == 'true' if clarification_match else False
+                    
+                    parsed = {
+                        "intent": intent_id,
+                        "confidence": 0.9,  # Default confidence for text format
+                        "needs_clarification": needs_clarification,
+                        "clarifying_question": ""
+                    }
+                else:
+                    raise ValueError("Could not extract valid JSON or text format from response")
         
         # Map the response to our expected format
         result = {
