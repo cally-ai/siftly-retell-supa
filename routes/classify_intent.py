@@ -218,7 +218,11 @@ def load_category(category_id: Optional[str]) -> Optional[dict]:
 def get_curated_clarifier(a: str, b: str) -> Optional[str]:
     cond = f"and(intent_id_a.eq.{a},intent_id_b.eq.{b}),and(intent_id_a.eq.{b},intent_id_b.eq.{a})"
     r = get_supabase_client().table("intent_clarifier").select("question,intent_id_a,intent_id_b").or_(cond).maybe_single().execute()
-    return None if (hasattr(r, "error") and r.error) else (r.data or {}).get("question")
+    if hasattr(r, "error") and r.error:
+        return None
+    if r is None or not hasattr(r, "data"):
+        return None
+    return (r.data or {}).get("question")
 
 def classify_with_openrouter(utter_en: str, candidates: list[dict], target_language: Optional[str]) -> dict:
     schema = {
@@ -270,15 +274,49 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
         
         if not content or content.strip() == "":
             raise ValueError("Empty response from OpenRouter API")
-            
-        parsed = json.loads(content)
-        parsed["latency_ms"] = latency_ms
-        parsed["model"] = CLASSIFY_MODEL
-        parsed["request_id"] = getattr(resp, "id", None)
-        usage = getattr(resp, "usage", None) or {}
-        parsed["prompt_tokens"] = getattr(usage, "prompt_tokens", None) or usage.get("prompt_tokens")
-        parsed["completion_tokens"] = getattr(usage, "completion_tokens", None) or usage.get("completion_tokens")
-        return parsed
+        
+        # Try to extract just the JSON part if there's extra text
+        explanation = ""
+        try:
+            # First try to parse as-is
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            # If that fails, try to find the JSON object in the response
+            import re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                parsed = json.loads(json_str)
+                
+                # Extract explanation from the remaining text
+                remaining_text = content[json_match.end():].strip()
+                if remaining_text:
+                    # Look for explanation patterns
+                    explanation_match = re.search(r'explanation[:\s]*["\']?([^"\']+)["\']?', remaining_text, re.IGNORECASE)
+                    if explanation_match:
+                        explanation = explanation_match.group(1).strip()
+                    else:
+                        # If no specific explanation pattern, take the first sentence
+                        explanation = remaining_text.split('.')[0].strip()
+            else:
+                raise ValueError("Could not extract valid JSON from response")
+        
+        # Map the response to our expected format
+        result = {
+            "best_intent_id": parsed.get("intent") or parsed.get("best_intent_id") or "",
+            "confidence": parsed.get("confidence", 0.5),
+            "needs_clarification": parsed.get("needs_clarification", False),
+            "clarify_question": parsed.get("clarifying_question") or parsed.get("clarify_question") or "",
+            "alternatives": parsed.get("alternatives", []),
+            "explanation": explanation,  # Add the explanation
+            "latency_ms": latency_ms,
+            "model": CLASSIFY_MODEL,
+            "request_id": getattr(resp, "id", None),
+            "prompt_tokens": getattr(getattr(resp, "usage", None), "prompt_tokens", None),
+            "completion_tokens": getattr(getattr(resp, "usage", None), "completion_tokens", None)
+        }
+        
+        return result
         
     except Exception as e:
         print(f"Error in classify_with_openrouter: {e}")
@@ -477,7 +515,8 @@ def classify_intent():
             "router_version": "v1",
             "utterance": _redact_pii(context_text),
             "detected_lang": (caller_language.lower() or None),
-            "utterance_en": _redact_pii(ctx_en)
+            "utterance_en": _redact_pii(ctx_en),
+            "explanation": cls.get("explanation", "")  # Add the AI explanation
         }).execute()
     except Exception:
         pass
