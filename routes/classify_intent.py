@@ -251,24 +251,55 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
     }
     cand_list = "\n".join([f"- [{c['id']}] {c['name']}: {c.get('description','')}".strip() for c in candidates])
     t0 = time.time()
-    resp = get_or_client().chat.completions.create(
-        model=CLASSIFY_MODEL,
-        messages=[
-            {"role": "system", "content": "You are a call intent classifier. Choose exactly one best intent from the candidate list. If uncertain, set needs_clarification=true and output ONE short question." + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")},
-            {"role": "user", "content": f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'}
-        ],
-        response_format={"type": "json_schema", "json_schema": schema}
-    )
-    latency_ms = int((time.time() - t0) * 1000)
-    content = (resp.choices[0].message.content or "{}").strip()
-    parsed = json.loads(content)
-    parsed["latency_ms"] = latency_ms
-    parsed["model"] = CLASSIFY_MODEL
-    parsed["request_id"] = getattr(resp, "id", None)
-    usage = getattr(resp, "usage", None) or {}
-    parsed["prompt_tokens"] = getattr(usage, "prompt_tokens", None) or usage.get("prompt_tokens")
-    parsed["completion_tokens"] = getattr(usage, "completion_tokens", None) or usage.get("completion_tokens")
-    return parsed
+    
+    try:
+        resp = get_or_client().chat.completions.create(
+            model=CLASSIFY_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a call intent classifier. Choose exactly one best intent from the candidate list. If uncertain, set needs_clarification=true and output ONE short question." + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")},
+                {"role": "user", "content": f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'}
+            ],
+            response_format={"type": "json_schema", "json_schema": schema}
+        )
+        latency_ms = int((time.time() - t0) * 1000)
+        content = (resp.choices[0].message.content or "{}").strip()
+        
+        # Debug logging
+        print(f"OpenRouter response content: '{content}'")
+        print(f"OpenRouter response length: {len(content)}")
+        
+        if not content or content.strip() == "":
+            raise ValueError("Empty response from OpenRouter API")
+            
+        parsed = json.loads(content)
+        parsed["latency_ms"] = latency_ms
+        parsed["model"] = CLASSIFY_MODEL
+        parsed["request_id"] = getattr(resp, "id", None)
+        usage = getattr(resp, "usage", None) or {}
+        parsed["prompt_tokens"] = getattr(usage, "prompt_tokens", None) or usage.get("prompt_tokens")
+        parsed["completion_tokens"] = getattr(usage, "completion_tokens", None) or usage.get("completion_tokens")
+        return parsed
+        
+    except Exception as e:
+        print(f"Error in classify_with_openrouter: {e}")
+        print(f"OpenRouter API Key set: {bool(Config.OPENROUTER_API_KEY)}")
+        print(f"OpenRouter Base URL: {OPENROUTER_BASE_URL}")
+        print(f"Classify Model: {CLASSIFY_MODEL}")
+        
+        # Return a fallback response
+        return {
+            "best_intent_id": candidates[0]["id"] if candidates else "",
+            "confidence": 0.5,
+            "needs_clarification": True,
+            "clarify_question": "I'm having trouble understanding. Could you please repeat that?",
+            "alternatives": [],
+            "latency_ms": int((time.time() - t0) * 1000),
+            "model": CLASSIFY_MODEL,
+            "request_id": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "error": str(e)
+        }
 
 def effective_policy(intent_row: dict, category_row: Optional[dict]) -> dict:
     action = intent_row.get("action_policy_override") or (category_row or {}).get("default_action_policy") or "ask_urgency_then_collect"
