@@ -195,7 +195,8 @@ def embed_english(text: str) -> tuple[list[float], int, str]:
 
 def match_topk(client_id: str, vec: list[float], k: int) -> list[dict]:
     r = get_supabase_client().rpc("match_intents", {"client_row_id": client_id, "query_embedding": vec, "match_count": k}).execute()
-    if r.error: raise RuntimeError(r.error.message)
+    if hasattr(r, 'error') and r.error: 
+        raise RuntimeError(r.error.message)
     return r.data or []
 
 def load_intents(intent_ids: list[str]) -> list[dict]:
@@ -203,7 +204,8 @@ def load_intents(intent_ids: list[str]) -> list[dict]:
     r = get_supabase_client().table("intent").select(
         "id,name,description,category_id,action_policy_override,transfer_number_override,priority,routing_target"
     ).in_("id", intent_ids).execute()
-    if r.error: raise RuntimeError(r.error.message)
+    if hasattr(r, 'error') and r.error: 
+        raise RuntimeError(r.error.message)
     return r.data or []
 
 def load_category(category_id: Optional[str]) -> Optional[dict]:
@@ -211,12 +213,12 @@ def load_category(category_id: Optional[str]) -> Optional[dict]:
     r = get_supabase_client().table("intent_category").select(
         "id,name,default_action_policy,transfer_number,priority"
     ).eq("id", category_id).single().execute()
-    return None if getattr(r, "error", None) else r.data
+    return None if (hasattr(r, "error") and r.error) else r.data
 
 def get_curated_clarifier(a: str, b: str) -> Optional[str]:
     cond = f"and(intent_id_a.eq.{a},intent_id_b.eq.{b}),and(intent_id_a.eq.{b},intent_id_b.eq.{a})"
     r = get_supabase_client().table("intent_clarifier").select("question,intent_id_a,intent_id_b").or_(cond).maybe_single().execute()
-    return None if getattr(r, "error", None) else (r.data or {}).get("question")
+    return None if (hasattr(r, "error") and r.error) else (r.data or {}).get("question")
 
 def classify_with_openrouter(utter_en: str, candidates: list[dict], target_language: Optional[str]) -> dict:
     schema = {
