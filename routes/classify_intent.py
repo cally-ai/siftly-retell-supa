@@ -176,6 +176,13 @@ def _extract_retell_args(body: dict) -> Optional[dict]:
 def translate_to_english(text: str) -> tuple[str, int]:
     if not text: return "", 0
     t0 = time.time()
+    
+    # Debug logging for translation request
+    print(f"=== TRANSLATION REQUEST ===")
+    print(f"Text to translate: '{text}'")
+    print(f"Model: {TRANSLATE_MODEL}")
+    print(f"=== END TRANSLATION REQUEST ===")
+    
     resp = get_or_client().chat.completions.create(
         model=TRANSLATE_MODEL,
         messages=[
@@ -189,6 +196,13 @@ def translate_to_english(text: str) -> tuple[str, int]:
 
 def embed_english(text: str) -> tuple[list[float], int, str]:
     t0 = time.time()
+    
+    # Debug logging for embedding request
+    print(f"=== EMBEDDING REQUEST ===")
+    print(f"Text to embed: '{text}'")
+    print(f"Text length: {len(text)}")
+    print(f"=== END EMBEDDING REQUEST ===")
+    
     resp = get_emb_client().embeddings.create(model="text-embedding-3-small", input=text)
     latency_ms = int((time.time() - t0) * 1000)
     return resp.data[0].embedding, latency_ms, "text-embedding-3-small"
@@ -255,6 +269,17 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
     }
     cand_list = "\n".join([f"- [{c['id']}] {c['name']}: {c.get('description','')}".strip() for c in candidates])
     t0 = time.time()
+    
+    # Debug logging for OpenRouter request
+    system_message = "You are a call intent classifier. Choose exactly one best intent from the candidate list. If uncertain, set needs_clarification=true and output ONE short question." + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")
+    user_message = f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'
+    
+    print(f"=== OPENROUTER REQUEST ===")
+    print(f"Model: {CLASSIFY_MODEL}")
+    print(f"System message: {system_message}")
+    print(f"User message: {user_message}")
+    print(f"Schema: {schema}")
+    print(f"=== END OPENROUTER REQUEST ===")
     
     try:
         resp = get_or_client().chat.completions.create(
@@ -365,19 +390,35 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
         print(f"Classify Model: {CLASSIFY_MODEL}")
         
         # Return a fallback response
-        return {
-            "best_intent_id": candidates[0]["id"] if candidates else "",
-            "confidence": 0.5,
-            "needs_clarification": True,
-            "clarify_question": "I'm having trouble understanding. Could you please repeat that?",
-            "alternatives": [],
-            "latency_ms": int((time.time() - t0) * 1000),
-            "model": CLASSIFY_MODEL,
-            "request_id": None,
-            "prompt_tokens": None,
-            "completion_tokens": None,
-            "error": str(e)
-        }
+        if not candidates:
+            return {
+                "best_intent_id": None,
+                "confidence": 0.0,
+                "needs_clarification": False,
+                "clarify_question": "",
+                "alternatives": [],
+                "latency_ms": int((time.time() - t0) * 1000),
+                "model": CLASSIFY_MODEL,
+                "request_id": None,
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "error": str(e),
+                "explanation": "No matching intents found in database"
+            }
+        else:
+            return {
+                "best_intent_id": candidates[0]["id"] if candidates else "",
+                "confidence": 0.5,
+                "needs_clarification": True,
+                "clarify_question": "I'm having trouble understanding. Could you please repeat that?",
+                "alternatives": [],
+                "latency_ms": int((time.time() - t0) * 1000),
+                "model": CLASSIFY_MODEL,
+                "request_id": None,
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "error": str(e)
+            }
 
 def effective_policy(intent_row: dict, category_row: Optional[dict]) -> dict:
     action = intent_row.get("action_policy_override") or (category_row or {}).get("default_action_policy") or "ask_urgency_then_collect"
@@ -511,6 +552,32 @@ def classify_intent():
     intents = load_intents(intent_ids)
     candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
                   for t in top for i in intents if i["id"] == t["intent_id"]]
+    
+    # Handle case where no intents match
+    if not candidates:
+        print(f"=== NO MATCHING INTENTS ===")
+        print(f"Client ID: {client_id}")
+        print(f"Query: '{query_en or ctx_en}'")
+        print(f"Top K results: {top}")
+        print(f"=== END NO MATCHING INTENTS ===")
+        
+        # Return a fallback response for unmatched intents
+        return jsonify({
+            "call_id": _resolve_call_id(provided_call_id, retell_event_id),
+            "intent_id": None,
+            "intent_name": "Unmatched Intent",
+            "confidence": 0.0,
+            "needs_clarification": False,
+            "clarify_question": "",
+            "action_policy": "transfer_to_human",
+            "transfer_number": None,  # Will route to human agent
+            "category_name": "General Inquiry",
+            "telemetry": {
+                "embedding_top1_sim": None,
+                "topK": [],
+                "unmatched_intent": True
+            }
+        })
 
     # 4) Classify (use richer context)
     cls = classify_with_openrouter(ctx_en or query_en or "", candidates, target_lang)
@@ -556,7 +623,8 @@ def classify_intent():
             "utterance": _redact_pii(context_text),
             "detected_lang": (caller_language.lower() or None),
             "utterance_en": _redact_pii(ctx_en),
-            "explanation": cls.get("explanation", "")  # Add the AI explanation
+            "explanation": cls.get("explanation", ""),  # Add the AI explanation
+            "unmatched_intent": not bool(candidates)  # Flag for unmatched intents
         }).execute()
     except Exception:
         pass
