@@ -139,6 +139,40 @@ def _detect_language_simple(s: str) -> str:
 def _json_string(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
+def _extract_retell_args(body: dict) -> Optional[dict]:
+    """
+    Expecting Retell payload:
+      body.call.transcript (string)
+      body.call.retell_llm_dynamic_variables.client_id (uuid text)
+      body.call.call_id (string)
+      body.call.telephony_identifier.twilio_call_sid (string, optional)
+    Returns dict: {client_id, conversation, retell_event_id, call_id, caller_language}
+    """
+    call = body.get("call") or {}
+    transcript = call.get("transcript") or ""
+    dyn = call.get("retell_llm_dynamic_variables") or {}
+    client_id = (dyn.get("client_id") or "").strip()
+
+    # Prefer Retell's call_id; also capture Twilio SID for logging/trace
+    call_id = (call.get("call_id") or "").strip()
+    twilio_sid = ((call.get("telephony_identifier") or {}).get("twilio_call_sid") or "").strip()
+    if not call_id and twilio_sid:
+        call_id = f"TWILIO:{twilio_sid}"
+
+    # A lightweight 'event id' if you want uniqueness in your logs
+    retell_event_id = call_id or f"evt:{uuidlib.uuid4()}"
+
+    if not transcript or not client_id:
+        return None
+
+    return {
+        "client_id": client_id,
+        "conversation": transcript,
+        "retell_event_id": retell_event_id,
+        "call_id": call_id,
+        "caller_language": None  # Retell doesn't send this; language detection will handle it
+    }
+
 def translate_to_english(text: str) -> tuple[str, int]:
     if not text: return "", 0
     t0 = time.time()
@@ -286,53 +320,47 @@ def classify_intent():
     """
     Input JSON (Retell):
     {
-      "message": {
-        "toolCallList": [
-          {
-            "id": "toolu_01...MF",          // echo this back as toolCallId
-            "name": "your_function_name",
-            "arguments": {
-              "client_id": "uuid",
-              "conversation": "The conversation history content",
-                             "retell_event_id": "webhook_event_id",
-              "call_id": "CAxxxxxxxx",            // optional but preferred
-              "caller_language": "nl"              // Deepgram code (e.g., en, en-US, nl, fr, de, es, pt-BR, ja, ko, zh, zh-TW)
-            }
-          }
-        ]
+      "call": {
+        "transcript": "The conversation history content",
+        "call_id": "call_abc123",
+        "retell_llm_dynamic_variables": {
+          "client_id": "uuid"
+        },
+        "telephony_identifier": {
+          "twilio_call_sid": "CAxxxxxxxx"  // optional
+        }
       }
     }
 
     Output JSON:
     {
-      "results": [
-        { "toolCallId": "<same id>", "result": "<JSON string>" }
-      ]
+      "call_id": "call_abc123",
+      "intent_id": "intent_456",
+      "intent_name": "Reschedule Appointment",
+      "confidence": 0.85,
+      "needs_clarification": false,
+      "clarify_question": "",
+      "routing": {
+        "action_policy": "ask_urgency_then_collect",
+        "transfer_number": "+1234567890",
+        "category_name": "Appointments"
+      },
+      "telemetry": {
+        "embedding_top1_sim": 0.92,
+        "topK": [...]
+      }
     }
     """
     body = request.get_json(silent=True) or {}
-    message = body.get("message") or {}
-    tool_calls: List[Dict[str, Any]] = message.get("toolCallList") or []
+    args = _extract_retell_args(body)
+    if not args:
+        return jsonify({"error": "Missing required fields: call.transcript and client_id"}), 400
 
-    final_result: Optional[Dict[str, Any]] = None
-
-    if not tool_calls:
-        return jsonify({"error": "No toolCallList in payload"}), 400
-
-    for tc in tool_calls:
-        tool_id = (tc.get("id") or "").strip() or "call_id"
-        args = tc.get("arguments") or {}
-
-        client_id = (args.get("client_id") or "").strip()
-        conversation = (args.get("conversation") or "").strip()
-        retell_event_id = (args.get("retell_event_id") or "").strip()
-        provided_call_id = (args.get("call_id") or "").strip()
-        caller_language = (args.get("caller_language") or "").strip()  # Deepgram language code if provided
-
-        # Validate
-        missing = [k for k in ["client_id", "conversation", "retell_event_id"] if not args.get(k)]
-        if missing:
-            return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
+    client_id        = args["client_id"]
+    conversation     = args["conversation"]
+    retell_event_id  = args["retell_event_id"]
+    provided_call_id = args.get("call_id") or ""
+    caller_language  = args.get("caller_language") or ""
 
         # 1) Build context + embedding query
         context_text = _extract_user_context(conversation, max_lines=50)   # for LLM classification
@@ -365,6 +393,9 @@ def classify_intent():
         target_lang = normalize_target_language(caller_language)
 
         # 3) Embed + shortlist (use sharp query text)
+        if not (query_en or ctx_en):
+            return jsonify({"error": "No usable text to embed/classify"}), 400
+            
         vec, embed_ms, emb_model = embed_english(query_en or ctx_en or "")
         top = match_topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
         intent_ids = [t["intent_id"] for t in top]
@@ -434,6 +465,4 @@ def classify_intent():
                 "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
             }
         }
-        final_result = result_obj
-
-    return jsonify(final_result)
+        return jsonify(result_obj)
