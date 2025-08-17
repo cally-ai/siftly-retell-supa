@@ -246,25 +246,14 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "best_intent_id": {"type": "string"},
+                "intent": {"type": "string"},
+                "intent_name": {"type": "string"},
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                 "needs_clarification": {"type": "boolean"},
-                "clarify_question": {"type": "string", "default": ""},
-                "alternatives": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "intent_id": {"type": "string"},
-                            "confidence": {"type": "number", "minimum": 0, "maximum": 1}
-                        },
-                        "required": ["intent_id", "confidence"]
-                    },
-                    "default": []
-                }
+                "clarifying_question": {"type": "string"},
+                "explanation": {"type": "string"}
             },
-            "required": ["best_intent_id", "confidence", "needs_clarification", "clarify_question", "alternatives"]
+            "required": ["intent", "intent_name", "confidence", "needs_clarification", "clarifying_question", "explanation"]
         }
     }
     cand_list = "\n".join([f"- [{c['id']}] {c['name']}: {c.get('description','')}".strip() for c in candidates])
@@ -277,11 +266,12 @@ Choose exactly one best intent from the candidate list. If uncertain, set needs_
 
 REQUIRED JSON SCHEMA:
 {
-  "best_intent_id": "<intent_id_from_candidate_list>",
+  "intent": "<intent_id_from_candidate_list>",
+  "intent_name": "<human-readable>",
   "confidence": <number_between_0_and_1>,
   "needs_clarification": <boolean>,
-  "clarify_question": "<question_or_null>",
-  "alternatives": []
+  "clarifying_question": "<string_or_null>",
+  "explanation": "<explanation_of_reasoning>"
 }""" + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")
     user_message = f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'
     
@@ -311,77 +301,26 @@ REQUIRED JSON SCHEMA:
         if not content or content.strip() == "":
             raise ValueError("Empty response from OpenRouter API")
         
-        # Try to extract just the JSON part if there's extra text
-        explanation = ""
+        # Try to parse the JSON response
         try:
-            # First try to parse as-is
             parsed = json.loads(content)
-            # Extract explanation from the JSON response
-            explanation = parsed.get("explanation", "")
         except json.JSONDecodeError:
             # If that fails, try to find the JSON object in the response
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
                 parsed = json.loads(json_str)
-                # Extract explanation from the JSON response
-                explanation = parsed.get("explanation", "")
-                
-                # If no explanation in JSON, try to extract from remaining text
-                if not explanation:
-                    remaining_text = content[json_match.end():].strip()
-                    if remaining_text:
-                        # Look for explanation patterns
-                        explanation_match = re.search(r'explanation[:\s]*["\']?([^"\']+)["\']?', remaining_text, re.IGNORECASE)
-                        if explanation_match:
-                            explanation = explanation_match.group(1).strip()
-                        else:
-                            # If no specific explanation pattern, take the first sentence
-                            explanation = remaining_text.split('.')[0].strip()
             else:
-                # Handle plain text format (new OpenRouter format)
-                # Example: "Intent: [id] name\ndescription\nneeds_clarification=false"
-                intent_match = re.search(r'Intent:\s*\[([^\]]+)\]\s*([^\n]+)', content, re.IGNORECASE)
-                if intent_match:
-                    intent_id = intent_match.group(1).strip()
-                    intent_name = intent_match.group(2).strip()
-                    
-                    # Extract explanation (everything between intent name and needs_clarification)
-                    lines = content.split('\n')
-                    explanation_lines = []
-                    in_explanation = False
-                    
-                    for line in lines:
-                        if 'needs_clarification=' in line:
-                            break
-                        if in_explanation:
-                            explanation_lines.append(line.strip())
-                        elif intent_name in line:
-                            in_explanation = True
-                    
-                    explanation = ' '.join(explanation_lines).strip()
-                    
-                    # Extract needs_clarification
-                    clarification_match = re.search(r'needs_clarification\s*=\s*(true|false)', content, re.IGNORECASE)
-                    needs_clarification_text = clarification_match.group(1).lower() if clarification_match else "false"
-                    
-                    parsed = {
-                        "intent": intent_id,
-                        "confidence": 0.9,  # Default confidence for text format
-                        "needs_clarification": needs_clarification_text,  # Keep as text
-                        "clarifying_question": ""
-                    }
-                else:
-                    raise ValueError("Could not extract valid JSON or text format from response")
+                raise ValueError("Could not extract valid JSON from response")
         
         # Validate intent ID format
-        intent_id = parsed.get("best_intent_id", "")
+        intent_id = parsed.get("intent", "")
         if intent_id and not re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', intent_id, re.IGNORECASE):
             print(f"WARNING: Invalid intent format: {intent_id}")
             # If intent is invalid, set needs_clarification to true
-            parsed["best_intent_id"] = ""
+            parsed["intent"] = ""
             parsed["needs_clarification"] = True
-            parsed["clarify_question"] = "I'm having trouble understanding. Could you please repeat that?"
+            parsed["clarifying_question"] = "I'm having trouble understanding. Could you please repeat that?"
         
         # Map the response to our expected format
         needs_clarification_value = parsed.get("needs_clarification", False)
@@ -392,12 +331,12 @@ REQUIRED JSON SCHEMA:
             needs_clarification_bool = bool(needs_clarification_value)
             
         result = {
-            "best_intent_id": parsed.get("best_intent_id") or "",
+            "best_intent_id": parsed.get("intent") or "",
             "confidence": parsed.get("confidence", 0.5),
             "needs_clarification": needs_clarification_bool,  # Convert to boolean for the result
-            "clarify_question": parsed.get("clarify_question") or "",
-            "alternatives": parsed.get("alternatives", []),
-            "explanation": explanation,  # Add the explanation
+            "clarify_question": parsed.get("clarifying_question") or "",
+            "alternatives": [],  # No longer used in new schema
+            "explanation": parsed.get("explanation", ""),  # Get explanation from JSON
             "latency_ms": latency_ms,
             "model": CLASSIFY_MODEL,
             "request_id": getattr(resp, "id", None),
