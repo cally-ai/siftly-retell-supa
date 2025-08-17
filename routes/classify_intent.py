@@ -277,11 +277,11 @@ Choose exactly one best intent from the candidate list. If uncertain, set needs_
 
 REQUIRED JSON SCHEMA:
 {
-  "intent": "<intent_id_from_candidate_list>",
+  "best_intent_id": "<intent_id_from_candidate_list>",
   "confidence": <number_between_0_and_1>,
   "needs_clarification": <boolean>,
-  "clarifying_question": "<question_or_null>",
-  "explanation": "<short_explanation_of_reasoning>"
+  "clarify_question": "<question_or_null>",
+  "alternatives": []
 }""" + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")
     user_message = f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'
     
@@ -375,13 +375,13 @@ REQUIRED JSON SCHEMA:
                     raise ValueError("Could not extract valid JSON or text format from response")
         
         # Validate intent ID format
-        intent_id = parsed.get("intent", "")
+        intent_id = parsed.get("best_intent_id", "")
         if intent_id and not re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', intent_id, re.IGNORECASE):
             print(f"WARNING: Invalid intent format: {intent_id}")
             # If intent is invalid, set needs_clarification to true
-            parsed["intent"] = ""
+            parsed["best_intent_id"] = ""
             parsed["needs_clarification"] = True
-            parsed["clarifying_question"] = "I'm having trouble understanding. Could you please repeat that?"
+            parsed["clarify_question"] = "I'm having trouble understanding. Could you please repeat that?"
         
         # Map the response to our expected format
         needs_clarification_value = parsed.get("needs_clarification", False)
@@ -392,10 +392,10 @@ REQUIRED JSON SCHEMA:
             needs_clarification_bool = bool(needs_clarification_value)
             
         result = {
-            "best_intent_id": parsed.get("intent") or parsed.get("best_intent_id") or "",
+            "best_intent_id": parsed.get("best_intent_id") or "",
             "confidence": parsed.get("confidence", 0.5),
             "needs_clarification": needs_clarification_bool,  # Convert to boolean for the result
-            "clarify_question": parsed.get("clarifying_question") or parsed.get("clarify_question") or "",
+            "clarify_question": parsed.get("clarify_question") or "",
             "alternatives": parsed.get("alternatives", []),
             "explanation": explanation,  # Add the explanation
             "latency_ms": latency_ms,
