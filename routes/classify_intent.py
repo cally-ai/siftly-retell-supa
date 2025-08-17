@@ -690,7 +690,7 @@ def classify_intent():
         "intent_id": (best_row or {}).get("id"),
         "intent_name": (best_row or {}).get("name"),
         "confidence": cls.get("confidence"),
-        "needs_clarification": str(needs).lower(),  # Convert boolean to string "true"/"false"
+        "needs_clarification": "yes" if needs else "no",  # Convert boolean to string "yes"/"no"
         "clarify_question": clarify_q if needs else "",
         "telemetry": {
             "embedding_top1_sim": (top[0]["similarity"] if top else None),
