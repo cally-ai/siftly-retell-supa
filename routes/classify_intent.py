@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 from supabase import create_client, Client
 from openai import OpenAI
 from config import Config
+from utils.intents import get_general_question_intent_id
 
 # --- Blueprint dedicated to this feature ---
 classify_bp = Blueprint("classify_bp", __name__)
@@ -17,7 +18,6 @@ TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "openai/gpt-4o-mini")
 TOP_K = int(os.getenv("TOP_K", "7"))
 
 # --- KB Prefetch Configuration ---
-GENERAL_QUESTION_ID = os.getenv("GENERAL_QUESTION_ID", "PUT-GENERAL-QUESTION-UUID-HERE")
 GENERAL_ACTION_POLICY = os.getenv("GENERAL_ACTION_POLICY", "answer_from_kb")
 GENERAL_CATEGORY_NAME = os.getenv("GENERAL_CATEGORY_NAME", "knowledge_base")
 KB_SCORE_THRESH = float(os.getenv("KB_SCORE_THRESH", "0.70"))
@@ -543,12 +543,15 @@ def classify_intent():
     candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
                   for t in top for i in intents if i["id"] == t["intent_id"]]
 
+    # Get per-client General Question intent ID
+    general_question_id = get_general_question_intent_id(get_supabase_client(), client_id)
+    
     # ensure General Question is a candidate, even if vector shortlist didn't return it
-    if not any(c["id"] == GENERAL_QUESTION_ID for c in candidates):
+    if general_question_id and not any(c["id"] == general_question_id for c in candidates):
         candidates.append({
-            "id": GENERAL_QUESTION_ID,
+            "id": general_question_id,
             "name": "General Question",
-            "description": "Informational question to be answered from the knowledge base."
+            "description": "Informational questions answered from the knowledge base."
         })
 
     # 💡 start KB prefetch in parallel (cheap) while we talk to the LLM
@@ -626,7 +629,7 @@ def classify_intent():
     # 5) Effective routing
     best_id = cls.get("best_intent_id") or (candidates[0]["id"] if candidates else None)
     
-    is_general = (best_id == GENERAL_QUESTION_ID)
+    is_general = (best_id == general_question_id)
     needs = bool(cls.get("needs_clarification"))
 
     # Only compute transactional routing when NOT general and NOT needing clarification
