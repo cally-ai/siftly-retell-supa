@@ -85,6 +85,46 @@ def bubble_sales_candidates_first(candidates: list[dict]) -> list[dict]:
         return bool(SALES_INTENT_RE.search(s))
     return sorted(candidates, key=lambda c: (not is_salesy(c), c.get("name","")))
 
+def generate_cta_bridge(kb_title: str, kb_content: str, target_language: str | None) -> str:
+    """
+    Ask OpenRouter to produce ONE short sentence that smoothly
+    transitions from the KB answer to a clear call-to-action.
+    Must include at least one booking/quote keyword so downstream
+    detection can route a 'yes' to Sales.
+    """
+    lang = (target_language or "en").strip().lower()
+    locale_hint = "" if lang in ("", "en") else f"Write it in {lang}."
+    system = (
+        "You are a concise call-center assistant. "
+        "Write ONE short sentence that bridges from the provided answer into a clear next step. "
+        "Do NOT invent facts. Do NOT repeat the answer. "
+        "Include at least one of these words so routing can detect acceptance: "
+        "'quote', 'estimate', 'book', 'schedule', 'appointment', 'assessment'. "
+        "Max 140 characters."
+    )
+    user = (
+        f"Answer title: {kb_title}\n"
+        f"Answer (for context, do not repeat): {kb_content}\n\n"
+        f"Task: Write ONE bridging CTA sentence that invites the caller to proceed. {locale_hint}"
+    )
+
+    try:
+        resp = get_or_client().chat.completions.create(
+            model=CLASSIFY_MODEL,            # you already use this client/model
+            messages=[{"role":"system","content":system},{"role":"user","content":user}],
+            temperature=0.2,                 # steady, not creative
+            max_tokens=60
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        # ultra-simple guardrail: if it forgot a keyword, fall back to a safe default
+        KEYWORDS = ("quote","estimate","book","schedule","appointment","assessment")
+        if not any(k in text.lower() for k in KEYWORDS):
+            return "Would you like me to schedule a site assessment for a precise quote?"
+        return text
+    except Exception:
+        # Fallback if OpenRouter hiccups
+        return "Would you like me to schedule a site assessment for a precise quote?"
+
 def _normalize_convo_lines(conversation: str) -> list[tuple[str, str]]:
     if not conversation:
         return []
@@ -747,6 +787,12 @@ def classify_intent():
                 "kb_score": top_kb.get("score"),
                 "kb_source_metadata": top_kb.get("metadata", {})
             })
+            # Generate the bridge + CTA with OpenRouter (kept flat)
+            result_obj["cta_text"] = generate_cta_bridge(
+                top_kb.get("title") or "",
+                top_kb.get("content") or "",
+                target_lang
+            )
         else:
             # Low confidence → clarifier only; ensure no kb_* fields are set
             result_obj.update({
