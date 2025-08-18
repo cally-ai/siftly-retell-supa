@@ -1,6 +1,7 @@
 # routes/classify_intent.py
 import os, re, json, time, uuid as uuidlib
 from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify
 from supabase import create_client, Client
 from openai import OpenAI
@@ -14,6 +15,13 @@ OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 CLASSIFY_MODEL = os.getenv("CLASSIFY_MODEL", "anthropic/claude-3.5-sonnet")
 TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "openai/gpt-4o-mini")
 TOP_K = int(os.getenv("TOP_K", "7"))
+
+# --- KB Prefetch Configuration ---
+GENERAL_QUESTION_ID = os.getenv("GENERAL_QUESTION_ID", "PUT-YOUR-GENERAL-QUESTION-UUID-HERE")
+KB_SCORE_THRESH = float(os.getenv("KB_SCORE_THRESH", "0.70"))
+
+# small thread pool for parallel KB lookup
+_kb_pool = ThreadPoolExecutor(max_workers=4)
 
 # --- Clients (lazy initialization) ---
 _supabase_client = None
@@ -132,6 +140,23 @@ def _redact_pii(s: str) -> str:
     s = re.sub(r"\b[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "[redacted-email]", s)
     s = re.sub(r"\b\+?\d[\d\s().-]{7,}\b", "[redacted-phone]", s)
     return s
+
+def vec_literal(arr: list[float]) -> str:
+    return "[" + ",".join(str(x) for x in arr) + "]"
+
+def kb_search_prefetch(client_id: str, query_vec: list[float], locale: Optional[str]) -> list[dict]:
+    """Calls your SQL function kb_search and returns top-k rows (or [])."""
+    vtxt = vec_literal(query_vec)  # pgvector text literal
+    r = get_supabase_client().rpc("kb_search", {
+        "p_client": client_id,
+        "p_query_embedding": vtxt,
+        "p_top_k": 5,
+        "p_locale": (locale or None)
+    }).execute()
+    if hasattr(r, "error") and r.error:
+        print("kb_search error:", getattr(r.error, "message", r.error))
+        return []
+    return r.data or []
 
 def _detect_language_simple(s: str) -> str:
     return "en" if re.match(r"^[\x00-\x7F]*$", s or "") else "unknown"
@@ -515,6 +540,9 @@ def classify_intent():
     intents = load_intents(intent_ids)
     candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
                   for t in top for i in intents if i["id"] == t["intent_id"]]
+
+    # 💡 start KB prefetch in parallel (cheap) while we talk to the LLM
+    kb_future = _kb_pool.submit(kb_search_prefetch, client_id, vec, caller_language or None)
     
     # Handle case where no intents match
     if not candidates:
@@ -644,4 +672,21 @@ def classify_intent():
             "transfer_number": routing.get("transfer_number"),
             "category_name": routing.get("category_name")
         })
+
+    # 👉 If it's GeneralQuestion, attach the prefetched KB top result for the next node to use
+    if not needs and best_id == GENERAL_QUESTION_ID:
+        try:
+            kb_rows = kb_future.result(timeout=0.01)  # don't block long; it likely finished already
+        except Exception as _:
+            kb_rows = []
+        top_kb = kb_rows[0] if kb_rows else None
+        if top_kb and (top_kb.get("score") or 0) >= KB_SCORE_THRESH:
+            # include a small, safe payload (title/content/score). The next node can speak this directly.
+            result_obj["qa_prefetch"] = {
+                "title": top_kb.get("title"),
+                "content": top_kb.get("content"),
+                "score": top_kb.get("score"),
+                "source_metadata": top_kb.get("metadata", {})
+            }
+
     return jsonify(result_obj)
