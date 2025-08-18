@@ -179,6 +179,81 @@ The application logs webhook and IVR operations. Check the logs in your Render d
 4. Test thoroughly
 5. Submit a pull request
 
+## KB Q&A Runbook (Ops)
+
+### What this does
+
+* Stores FAQs per tenant in `kb_documents` (one row) + `kb_chunks` (text + **pgvector** embedding).
+* Answers **General Question** calls directly from the KB.
+* Keeps normal routing (collect, transfer, schedule) for transactional intents.
+
+### Daily use
+
+#### Add / update a single FAQ
+
+Run your script (generates embedding, upserts the doc+chunk):
+
+```bash
+python faq_upsert.py
+```
+
+#### Batch import from CSV
+
+Use `csv_ingest.py` (supports `--client-id` or a `client_id` column):
+
+```bash
+python csv_ingest.py faq.csv --client-id <TENANT_UUID>
+```
+
+#### Verify latest docs
+
+```sql
+select d.id, d.title, d.locale, c.chunk_index, left(c.content,100) as preview
+from kb_documents d
+join kb_chunks c on c.doc_id = d.id
+where d.client_id = '<TENANT_UUID>'
+order by d.updated_at desc
+limit 10;
+```
+
+### How "General Question" works
+
+1. On each turn your backend runs **in parallel**:
+
+   * **Intent classifier** (LLM, temp=0) over a shortlist of your tenant's intents **plus** `general_question`.
+   * **KB lookup** (embed user text → `kb_search`) so the answer is ready.
+2. If the best intent is **General Question**:
+
+   * You **don't** return transactional routing.
+   * You return a small payload (`qa_prefetch`) with `title/content/score` (and optionally `action_policy: "answer_from_kb"`).
+   * The next node simply speaks that answer.
+3. If best intent is **not** General:
+
+   * You ignore the KB result and return normal routing (e.g., `collect_contact` → `warranty_queue`).
+
+### Confidence & clarifying
+
+* Use a KB score threshold (start at **0.70**).
+* If no KB hit ≥ threshold → set `"needs_clarification": "yes"` and return **one** short clarifying question.
+
+### Multilingual
+
+* Ingest docs with the proper `locale` (e.g., `nl`, `fr`).
+* Search with `p_locale` first; fallback to null if no good hit.
+* The embedding model is multilingual (`text-embedding-3-small`), so cross-language works, but same-language is best.
+
+### Keys & safety
+
+* `kb_documents.client_id` is a **UUID FK** → every doc belongs to a real tenant.
+* Service role key stays server-side only (never in clients).
+* After big ingests: `ANALYZE public.kb_chunks;`
+
+### Troubleshooting
+
+* **"invalid input syntax for type vector"**: you passed a placeholder. Send a real `'[n1,...,n1536]'` or use the array→vector RPC.
+* **"foreign key violation"**: wrong tenant UUID; create the tenant first or fix the id.
+* **Classifier picks a transactional intent for an FAQ**: ensure the `general_question` candidate is always appended and add 2–5 examples
+
 ## License
 
 This project is licensed under the MIT License. 
