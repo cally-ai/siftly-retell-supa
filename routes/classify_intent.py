@@ -128,32 +128,22 @@ def generate_cta_bridge(kb_title: str, kb_content: str, target_language: str | N
 def generate_acknowledgment(utterance: str, intent_name: str, action_policy: str, target_language: str | None) -> str:
     """
     Generate an empathetic acknowledgment that shows understanding of the caller's issue
-    before routing to the appropriate action.
+    without revealing what action will be taken next.
     """
     lang = (target_language or "en").strip().lower()
     locale_hint = "" if lang in ("", "en") else f"Write it in {lang}."
     
-    # Map action policies to acknowledgment types
-    policy_hints = {
-        "route_to_agent": "transfer you to a specialist",
-        "collect_contact": "collect your information",
-        "ask_urgency_then_collect": "assess the urgency and collect your details"
-    }
-    
-    action_hint = policy_hints.get(action_policy, "help you with this")
-    
     system = (
         "You are an empathetic call-center assistant. "
         "Write ONE short sentence that acknowledges the caller's issue and shows understanding. "
-        "Be empathetic but professional. Do NOT offer solutions yet. "
-        "Max 120 characters."
+        "Be empathetic but professional. Do NOT mention what you will do next. "
+        "Focus only on understanding and empathy. Max 120 characters."
     )
     
     user = (
         f"Caller said: {utterance}\n"
-        f"Intent: {intent_name}\n"
-        f"Next action: {action_hint}\n\n"
-        f"Task: Write ONE empathetic acknowledgment sentence. {locale_hint}"
+        f"Intent: {intent_name}\n\n"
+        f"Task: Write ONE empathetic acknowledgment sentence that shows understanding. {locale_hint}"
     )
 
     try:
@@ -166,13 +156,13 @@ def generate_acknowledgment(utterance: str, intent_name: str, action_policy: str
         text = (resp.choices[0].message.content or "").strip()
         return text
     except Exception:
-        # Fallback acknowledgments based on action policy
+        # Fallback acknowledgments - pure empathy, no action hints
         fallbacks = {
-            "route_to_agent": "I understand this is important to you. Let me transfer you to someone who can help.",
-            "collect_contact": "I can see this needs attention. Let me get your information to help you properly.",
-            "ask_urgency_then_collect": "I understand this is concerning. Let me assess the urgency and get your details."
+            "route_to_agent": "I understand this is important to you and I want to help.",
+            "collect_contact": "I can see this needs attention and I'm here to help.",
+            "ask_urgency_then_collect": "I understand this is concerning and I want to assist you."
         }
-        return fallbacks.get(action_policy, "I understand this is important to you. Let me help you with this.")
+        return fallbacks.get(action_policy, "I understand this is important to you and I want to help.")
 
 def _normalize_convo_lines(conversation: str) -> list[tuple[str, str]]:
     if not conversation:
