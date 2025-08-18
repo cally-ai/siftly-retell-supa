@@ -125,6 +125,55 @@ def generate_cta_bridge(kb_title: str, kb_content: str, target_language: str | N
         # Fallback if OpenRouter hiccups
         return "Would you like me to schedule a site assessment for a precise quote?"
 
+def generate_acknowledgment(utterance: str, intent_name: str, action_policy: str, target_language: str | None) -> str:
+    """
+    Generate an empathetic acknowledgment that shows understanding of the caller's issue
+    before routing to the appropriate action.
+    """
+    lang = (target_language or "en").strip().lower()
+    locale_hint = "" if lang in ("", "en") else f"Write it in {lang}."
+    
+    # Map action policies to acknowledgment types
+    policy_hints = {
+        "route_to_agent": "transfer you to a specialist",
+        "collect_contact": "collect your information",
+        "ask_urgency_then_collect": "assess the urgency and collect your details"
+    }
+    
+    action_hint = policy_hints.get(action_policy, "help you with this")
+    
+    system = (
+        "You are an empathetic call-center assistant. "
+        "Write ONE short sentence that acknowledges the caller's issue and shows understanding. "
+        "Be empathetic but professional. Do NOT offer solutions yet. "
+        "Max 120 characters."
+    )
+    
+    user = (
+        f"Caller said: {utterance}\n"
+        f"Intent: {intent_name}\n"
+        f"Next action: {action_hint}\n\n"
+        f"Task: Write ONE empathetic acknowledgment sentence. {locale_hint}"
+    )
+
+    try:
+        resp = get_or_client().chat.completions.create(
+            model=CLASSIFY_MODEL,
+            messages=[{"role":"system","content":system},{"role":"user","content":user}],
+            temperature=0.3,                 # slightly more empathetic
+            max_tokens=50
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        return text
+    except Exception:
+        # Fallback acknowledgments based on action policy
+        fallbacks = {
+            "route_to_agent": "I understand this is important to you. Let me transfer you to someone who can help.",
+            "collect_contact": "I can see this needs attention. Let me get your information to help you properly.",
+            "ask_urgency_then_collect": "I understand this is concerning. Let me assess the urgency and get your details."
+        }
+        return fallbacks.get(action_policy, "I understand this is important to you. Let me help you with this.")
+
 def _normalize_convo_lines(conversation: str) -> list[tuple[str, str]]:
     if not conversation:
         return []
@@ -814,10 +863,20 @@ def classify_intent():
 
     # For non-general intents, include transactional routing
     if routing and (not needs) and (not is_general):
+        action_policy = routing.get("action_policy")
         result_obj.update({
-            "action_policy": routing.get("action_policy"),
+            "action_policy": action_policy,
             "transfer_number": routing.get("transfer_number"),
             "category_name": routing.get("category_name")
         })
+        
+        # Generate empathetic acknowledgment for transactional intents
+        if action_policy in ["route_to_agent", "collect_contact", "ask_urgency_then_collect"]:
+            result_obj["acknowledgment_text"] = generate_acknowledgment(
+                ctx_en or query_en or "",  # Use the English utterance
+                result_obj.get("intent_name", ""),
+                action_policy,
+                target_lang
+            )
 
     return jsonify(result_obj)
