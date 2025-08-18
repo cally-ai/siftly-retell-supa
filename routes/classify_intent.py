@@ -54,6 +54,37 @@ ACK_REGEX = re.compile(
     flags=re.I
 )
 
+# Nudges for CTA acceptance (no state, transcript-only)
+CTA_RE   = re.compile(r'\b(quote|estimate|site (?:survey|assessment)|appointment|book|schedule)\b', re.I)
+NEG_RE   = re.compile(r'^(?:no|nope|nah|not now|maybe later)\W*$', re.I)
+SALES_INTENT_RE = re.compile(r'\b(quote|estimate|book|schedule|appointment|assessment|demo|consult|sales)\b', re.I)
+
+def saw_cta_yes(conversation: str) -> bool:
+    """Return True if last USER reply affirms a recent AGENT CTA (case-insensitive, small lookback)."""
+    lines = _normalize_convo_lines(conversation)  # roles already lowercased
+    if not lines: return False
+
+    # last USER/CALLER reply
+    user_idx = next((i for i in range(len(lines)-1, -1, -1) if lines[i][0] in {"user","caller","customer"}), None)
+    if user_idx is None: return False
+    user_text = lines[user_idx][1] or ""
+
+    # nearest preceding AGENT line (look back a few lines)
+    for j in range(user_idx-1, max(0, user_idx-6)-1, -1):
+        role, text = lines[j]
+        if role == "agent":
+            if CTA_RE.search(text or "") and ACK_REGEX.match(user_text) and not NEG_RE.match(user_text):
+                return True
+            break
+    return False
+
+def bubble_sales_candidates_first(candidates: list[dict]) -> list[dict]:
+    """Stable-sort: intents with sales-y names/descriptions go first."""
+    def is_salesy(c):
+        s = (c.get("name","") + " " + c.get("description",""))
+        return bool(SALES_INTENT_RE.search(s))
+    return sorted(candidates, key=lambda c: (not is_salesy(c), c.get("name","")))
+
 def _normalize_convo_lines(conversation: str) -> list[tuple[str, str]]:
     if not conversation:
         return []
@@ -265,7 +296,7 @@ def get_curated_clarifier(a: str, b: str) -> Optional[str]:
         return None
     return (r.data or {}).get("question")
 
-def classify_with_openrouter(utter_en: str, candidates: list[dict], target_language: Optional[str]) -> dict:
+def classify_with_openrouter(utter_en: str, candidates: list[dict], target_language: Optional[str], cta_yes: bool = False) -> dict:
     schema = {
         "name": "intent_classification",
         "strict": True,
@@ -286,6 +317,14 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
     cand_list = "\n".join([f"- [{c['id']}] {c['name']}: {c.get('description','')}".strip() for c in candidates])
     t0 = time.time()
     
+    # Build system message; add a one-line hint if CTA pattern detected
+    cta_hint = ""
+    if cta_yes:
+        cta_hint = (
+            "\nIf the previous AGENT turn invited the caller to book/schedule/quote and the last USER turn "
+            "is an affirmative (yes/okay/sure), choose the most appropriate sales/booking intent from the candidate list."
+        )
+
     # Debug logging for OpenRouter request
     system_message = """You are a call intent classifier. Return ONLY a single JSON object. No markdown. No code fences. No explanations outside JSON.
 
@@ -299,7 +338,7 @@ REQUIRED JSON SCHEMA:
   "needs_clarification": <boolean>,
   "clarifying_question": "<string_or_null>",
   "explanation": "<explanation_of_reasoning>"
-}""" + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")
+}""" + cta_hint + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")
     user_message = f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'
     
     print(f"=== OPENROUTER REQUEST ===")
@@ -554,6 +593,13 @@ def classify_intent():
             "description": "Informational questions answered from the knowledge base."
         })
 
+    # 3) CTA detection and sales intent biasing
+    cta_yes = saw_cta_yes(conversation)
+
+    # Reorder candidates to put sales-like intents first if CTA was accepted
+    if cta_yes:
+        candidates = bubble_sales_candidates_first(candidates)
+
     # 💡 start KB prefetch in parallel (cheap) while we talk to the LLM
     kb_future = _kb_pool.submit(kb_search_prefetch, client_id, vec, caller_language or None)
     
@@ -615,7 +661,7 @@ def classify_intent():
         })
 
     # 4) Classify (use richer context)
-    cls = classify_with_openrouter(ctx_en or query_en or "", candidates, target_lang)
+    cls = classify_with_openrouter(ctx_en or query_en or "", candidates, target_lang, cta_yes)
 
     # Clarifier override (if curated)
     clarify_q = cls.get("clarify_question") or ""
