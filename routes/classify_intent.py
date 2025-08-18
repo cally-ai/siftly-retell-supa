@@ -17,7 +17,9 @@ TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "openai/gpt-4o-mini")
 TOP_K = int(os.getenv("TOP_K", "7"))
 
 # --- KB Prefetch Configuration ---
-GENERAL_QUESTION_ID = os.getenv("GENERAL_QUESTION_ID", "PUT-YOUR-GENERAL-QUESTION-UUID-HERE")
+GENERAL_QUESTION_ID = os.getenv("GENERAL_QUESTION_ID", "PUT-GENERAL-QUESTION-UUID-HERE")
+GENERAL_ACTION_POLICY = os.getenv("GENERAL_ACTION_POLICY", "answer_from_kb")
+GENERAL_CATEGORY_NAME = os.getenv("GENERAL_CATEGORY_NAME", "knowledge_base")
 KB_SCORE_THRESH = float(os.getenv("KB_SCORE_THRESH", "0.70"))
 
 # small thread pool for parallel KB lookup
@@ -541,6 +543,14 @@ def classify_intent():
     candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
                   for t in top for i in intents if i["id"] == t["intent_id"]]
 
+    # ensure General Question is a candidate, even if vector shortlist didn't return it
+    if not any(c["id"] == GENERAL_QUESTION_ID for c in candidates):
+        candidates.append({
+            "id": GENERAL_QUESTION_ID,
+            "name": "General Question",
+            "description": "Informational question to be answered from the knowledge base."
+        })
+
     # 💡 start KB prefetch in parallel (cheap) while we talk to the LLM
     kb_future = _kb_pool.submit(kb_search_prefetch, client_id, vec, caller_language or None)
     
@@ -615,13 +625,16 @@ def classify_intent():
 
     # 5) Effective routing
     best_id = cls.get("best_intent_id") or (candidates[0]["id"] if candidates else None)
-    best_row = next((i for i in intents if i["id"] == best_id), intents[0] if intents else None)
-    category = load_category(best_row.get("category_id") if best_row else None)
-    routing = effective_policy(best_row or {}, category)
     
+    is_general = (best_id == GENERAL_QUESTION_ID)
     needs = bool(cls.get("needs_clarification"))
-    if needs:
-        routing = None  # Hide routing until intent is clarified
+
+    # Only compute transactional routing when NOT general and NOT needing clarification
+    routing = None
+    if (not needs) and (not is_general):
+        best_row = next((i for i in intents if i["id"] == best_id), intents[0] if intents else None)
+        category = load_category(best_row.get("category_id") if best_row else None)
+        routing = effective_policy(best_row or {}, category)
 
     # 6) Log (rich but safe)
     call_id = _resolve_call_id(provided_call_id, retell_event_id)
@@ -654,8 +667,8 @@ def classify_intent():
     # 7) Build result (must be STRING)
     result_obj = {
         "call_id": call_id,
-        "intent_id": (best_row or {}).get("id"),
-        "intent_name": (best_row or {}).get("name"),
+        "intent_id": best_id,
+        "intent_name": next((i["name"] for i in intents if i["id"] == best_id), "General Question" if is_general else None),
         "confidence": cls.get("confidence"),
         "needs_clarification": "yes" if needs else "no",  # Convert boolean to string "yes"/"no"
         "clarify_question": clarify_q if needs else "",
@@ -664,29 +677,34 @@ def classify_intent():
             "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
         }
     }
-    
-    # Add routing fields at top level (if not needs clarification)
-    if routing and not needs:
-        result_obj.update({
-            "action_policy": routing.get("action_policy"),
-            "transfer_number": routing.get("transfer_number"),
-            "category_name": routing.get("category_name")
-        })
 
-    # 👉 If it's GeneralQuestion, attach the prefetched KB top result for the next node to use
-    if not needs and best_id == GENERAL_QUESTION_ID:
+    # If general (and not needing clarification): attach KB answer and set answer_from_kb action policy
+    if (not needs) and is_general:
         try:
-            kb_rows = kb_future.result(timeout=0.01)  # don't block long; it likely finished already
-        except Exception as _:
+            kb_rows = kb_future.result(timeout=0.01)  # non-blocking; it likely finished already
+        except Exception:
             kb_rows = []
         top_kb = kb_rows[0] if kb_rows else None
         if top_kb and (top_kb.get("score") or 0) >= KB_SCORE_THRESH:
-            # include a small, safe payload (title/content/score). The next node can speak this directly.
             result_obj["qa_prefetch"] = {
                 "title": top_kb.get("title"),
                 "content": top_kb.get("content"),
                 "score": top_kb.get("score"),
                 "source_metadata": top_kb.get("metadata", {})
             }
+        # Set explicit "answer_from_kb" to drive your Q&A node
+        result_obj.update({
+            "action_policy": GENERAL_ACTION_POLICY,     # e.g., "answer_from_kb"
+            "transfer_number": None,
+            "category_name": GENERAL_CATEGORY_NAME      # e.g., "knowledge_base"
+        })
+
+    # For non-general intents, include transactional routing
+    if routing and (not needs) and (not is_general):
+        result_obj.update({
+            "action_policy": routing.get("action_policy"),
+            "transfer_number": routing.get("transfer_number"),
+            "category_name": routing.get("category_name")
+        })
 
     return jsonify(result_obj)
