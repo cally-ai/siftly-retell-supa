@@ -156,13 +156,13 @@ def generate_acknowledgment(utterance: str, intent_name: str, action_policy: str
         text = (resp.choices[0].message.content or "").strip()
         return text
     except Exception:
-        # Fallback acknowledgments - pure empathy, no action hints
+        # Fallback acknowledgments - pure empathy, varied structure
         fallbacks = {
-            "route_to_agent": "I understand this is important to you and I want to help.",
-            "collect_contact": "I can see this needs attention and I'm here to help.",
-            "ask_urgency_then_collect": "I understand this is concerning and I want to assist you."
+            "route_to_agent": "I understand this is important to you.",
+            "collect_contact": "I can see this needs attention.",
+            "ask_urgency_then_collect": "I understand this is concerning."
         }
-        return fallbacks.get(action_policy, "I understand this is important to you and I want to help.")
+        return fallbacks.get(action_policy, "I understand this is important to you.")
 
 def _normalize_convo_lines(conversation: str) -> list[tuple[str, str]]:
     if not conversation:
