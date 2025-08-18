@@ -685,6 +685,8 @@ def classify_intent():
         except Exception:
             kb_rows = []
         top_kb = kb_rows[0] if kb_rows else None
+        
+        # Check if KB has a good match
         if top_kb and (top_kb.get("score") or 0) >= KB_SCORE_THRESH:
             result_obj["qa_prefetch"] = {
                 "title": top_kb.get("title"),
@@ -692,12 +694,30 @@ def classify_intent():
                 "score": top_kb.get("score"),
                 "source_metadata": top_kb.get("metadata", {})
             }
-        # Set explicit "answer_from_kb" to drive your Q&A node
-        result_obj.update({
-            "action_policy": GENERAL_ACTION_POLICY,     # e.g., "answer_from_kb"
-            "transfer_number": None,
-            "category_name": GENERAL_CATEGORY_NAME      # e.g., "knowledge_base"
-        })
+            # Set explicit "answer_from_kb" to drive your Q&A node
+            result_obj.update({
+                "action_policy": GENERAL_ACTION_POLICY,     # e.g., "answer_from_kb"
+                "transfer_number": None,
+                "category_name": GENERAL_CATEGORY_NAME      # e.g., "knowledge_base"
+            })
+        else:
+            # Low confidence or no KB match - need clarification
+            # Generate a smart clarifying question based on available KB topics
+            clarify_question = "Could you please be more specific about what you're asking?"
+            if kb_rows:
+                # Use top KB results to suggest topics
+                topics = [row.get("title", "").split("?")[0] for row in kb_rows[:3] if row.get("title")]
+                if topics:
+                    topic_list = ", ".join(topics)
+                    clarify_question = f"Could you please be more specific? For example, are you asking about {topic_list}, or something else?"
+            
+            result_obj.update({
+                "needs_clarification": "yes",
+                "clarify_question": clarify_question,
+                "action_policy": GENERAL_ACTION_POLICY,
+                "transfer_number": None,
+                "category_name": GENERAL_CATEGORY_NAME
+            })
 
     # For non-general intents, include transactional routing
     if routing and (not needs) and (not is_general):
