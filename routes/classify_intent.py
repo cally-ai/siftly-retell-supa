@@ -794,15 +794,23 @@ def classify_intent():
                 target_lang
             )
         else:
-            # Low confidence → clarifier only; ensure no kb_* fields are set
+            # Low KB score but LLM said no clarification needed - provide KB answer anyway
+            # (LLM confidence takes precedence over KB score)
             result_obj.update({
-                "needs_clarification": "yes",
-                "clarify_question": result_obj.get("clarify_question") or "Could you please be more specific about what you're asking?"
+                "action_policy": GENERAL_ACTION_POLICY,
+                "category_name": GENERAL_CATEGORY_NAME,
+                "transfer_number": None,
+                "kb_title": top_kb.get("title") if top_kb else "General Information",
+                "kb_content": top_kb.get("content") if top_kb else "I can help you with that. Let me connect you with someone who can provide more specific information.",
+                "kb_score": top_kb.get("score") if top_kb else 0.0,
+                "kb_source_metadata": top_kb.get("metadata", {}) if top_kb else {}
             })
-            # Remove any routing fields if present
-            for k in ("action_policy", "category_name", "transfer_number",
-                      "kb_title", "kb_content", "kb_score", "kb_source_metadata"):
-                result_obj.pop(k, None)
+            # Generate the bridge + CTA with OpenRouter (kept flat)
+            result_obj["cta_text"] = generate_cta_bridge(
+                top_kb.get("title") or "General Information",
+                top_kb.get("content") or "I can help you with that. Let me connect you with someone who can provide more specific information.",
+                target_lang
+            )
 
     # For non-general intents, include transactional routing
     if routing and (not needs) and (not is_general):
