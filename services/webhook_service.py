@@ -287,15 +287,15 @@ class WebhookService:
             logger.info(f"Original number: {to_number}, Cleaned number: {cleaned_number}")
             
             # Step 1: Find client via twilio_number (try both original and cleaned)
-            tw_resp = self.supabase.table('twilio_number').select('client_id, language_id').eq('twilio_number', cleaned_number).limit(1).execute()
+            tw_resp = self.supabase.table('twilio_number').select('client_id, client_ivr_language_configuration_id').eq('twilio_number', cleaned_number).limit(1).execute()
             if not tw_resp.data:
                 # Fallback to original number if cleaned doesn't work
-                tw_resp = self.supabase.table('twilio_number').select('client_id, language_id').eq('twilio_number', to_number).limit(1).execute()
+                tw_resp = self.supabase.table('twilio_number').select('client_id, client_ivr_language_configuration_id').eq('twilio_number', to_number).limit(1).execute()
             if not tw_resp.data:
                 logger.warning(f"No twilio_number record found for: {to_number} (cleaned: {cleaned_number})")
                 return None
             client_id = tw_resp.data[0].get('client_id')
-            language_id = tw_resp.data[0].get('language_id')
+            client_ivr_language_configuration_id = tw_resp.data[0].get('client_ivr_language_configuration_id')
             if not client_id:
                 logger.warning(f"twilio_number {to_number} has no client_id")
                 return None
@@ -325,18 +325,28 @@ class WebhookService:
                         dynamic_variables[key] = value
                         logger.info(f"Added {key}: '{value}'")
 
-            # Get client language agent names
-            agent_names_resp = self.supabase.table('client_language_agent_name').select('language_id, agent_name').eq('client_id', client_id).execute()
-            if agent_names_resp.data:
-                for agent_record in agent_names_resp.data:
-                    agent_language_id = agent_record.get('language_id')
-                    agent_name = agent_record.get('agent_name')
-                    if agent_language_id and agent_name:
-                        # Get language code for the key
-                        lang_resp = self.supabase.table('language').select('language_code').eq('id', agent_language_id).limit(1).execute()
-                        if lang_resp.data:
-                            lang_code = lang_resp.data[0].get('language_code', 'en')
-                            dynamic_variables[f'agent_name_{lang_code}'] = agent_name
+            # Get client language agent names using the new structure
+            if client_ivr_language_configuration_id:
+                # Get all languages for this client's IVR configuration
+                language_config_resp = self.supabase.table('client_ivr_language_configuration_language').select('language_id').eq('client_id', client_id).eq('client_ivr_language_configuration_id', client_ivr_language_configuration_id).execute()
+                
+                if language_config_resp.data:
+                    # Get agent names for each language
+                    agent_names_resp = self.supabase.table('client_language_agent_name').select('language_id, agent_name').eq('client_id', client_id).execute()
+                    
+                    if agent_names_resp.data:
+                        for agent_record in agent_names_resp.data:
+                            agent_language_id = agent_record.get('language_id')
+                            agent_name = agent_record.get('agent_name')
+                            
+                            # Check if this language is in the client's IVR configuration
+                            if agent_language_id and agent_name and any(lang.get('language_id') == agent_language_id for lang in language_config_resp.data):
+                                # Get language code for the key
+                                lang_resp = self.supabase.table('language').select('language_code').eq('id', agent_language_id).limit(1).execute()
+                                if lang_resp.data:
+                                    lang_code = lang_resp.data[0].get('language_code', 'en')
+                                    dynamic_variables[f'agent_name_{lang_code}'] = agent_name
+                                    logger.info(f"Added agent name for language {lang_code}: {agent_name}")
 
 
 
