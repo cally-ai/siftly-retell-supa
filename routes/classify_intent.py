@@ -442,21 +442,32 @@ REQUIRED JSON SCHEMA:
         # Debug logging
         print(f"OpenRouter response content: '{content}'")
         print(f"OpenRouter response length: {len(content)}")
+        print(f"Response starts with '{{': {content.startswith('{')}")
+        print(f"Response ends with '}}': {content.endswith('}')}")
+        print(f"Response contains '}}': {'}' in content}")
         
         if not content or content.strip() == "":
             raise ValueError("Empty response from OpenRouter API")
         
         # Try to parse the JSON response
         try:
-    parsed = json.loads(content)
-        except json.JSONDecodeError:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as json_error:
+            print(f"JSON decode error: {json_error}")
+            print(f"Content that failed to parse: '{content}'")
             # If that fails, try to find the JSON object in the response
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
-                parsed = json.loads(json_str)
+                try:
+                    parsed = json.loads(json_str)
+                    print(f"Successfully extracted JSON with regex: '{json_str}'")
+                except json.JSONDecodeError as regex_error:
+                    print(f"Regex extraction also failed: {regex_error}")
+                    raise ValueError(f"Could not extract valid JSON from response. Original error: {json_error}")
             else:
-                raise ValueError("Could not extract valid JSON from response")
+                print(f"No JSON object found in content: '{content}'")
+                raise ValueError(f"Could not extract valid JSON from response. Original error: {json_error}")
         
         # Validate intent ID format
         intent_id = parsed.get("intent", "")
