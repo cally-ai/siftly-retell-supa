@@ -429,15 +429,15 @@ REQUIRED JSON SCHEMA:
     
     try:
         resp = get_or_client().chat.completions.create(
-        model=CLASSIFY_MODEL,
-        messages=[
+            model=CLASSIFY_MODEL,
+            messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message}
-        ],
-        response_format={"type": "json_schema", "json_schema": schema}
-    )
-    latency_ms = int((time.time() - t0) * 1000)
-    content = (resp.choices[0].message.content or "{}").strip()
+            ],
+            response_format={"type": "json_schema", "json_schema": schema}
+        )
+        latency_ms = int((time.time() - t0) * 1000)
+        content = (resp.choices[0].message.content or "{}").strip()
         
         # Debug logging
         print(f"OpenRouter response content: '{content}'")
@@ -448,7 +448,7 @@ REQUIRED JSON SCHEMA:
         
         # Try to parse the JSON response
         try:
-    parsed = json.loads(content)
+            parsed = json.loads(content)
         except json.JSONDecodeError:
             # If that fails, try to find the JSON object in the response
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
