@@ -164,7 +164,7 @@ class WebhookService:
                 return None
             
             # 2) Fetch opening hours for this client
-            oh_resp = self.supabase.table('opening_hours').select('day, start_time, end_time').eq('client_id', client_id).execute()
+            oh_resp = self.supabase.table('opening_hours').select('day, day_order, start_time, end_time, break_start_time, break_end_time').eq('client_id', client_id).execute()
             opening_hours_records = oh_resp.data or []
             if not opening_hours_records:
                 logger.warning(f"No opening hours configured for client: {client_id}")
@@ -197,6 +197,14 @@ class WebhookService:
             # Handle both scenarios: single record with list of days, or multiple records with individual days
             for hours_record in opening_hours:
                 day_field = hours_record.get('day', '')
+                day_order_field = hours_record.get('day_order', '')
+                
+                # Convert current weekday to day_order number (1=monday, 7=sunday)
+                weekday_to_number = {
+                    'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4,
+                    'friday': 5, 'saturday': 6, 'sunday': 7
+                }
+                current_day_number = weekday_to_number.get(current_weekday)
                 
                 # If day is a list (single record with multiple days)
                 if isinstance(day_field, list):
@@ -204,10 +212,15 @@ class WebhookService:
                     if current_weekday in days:
                         current_day_hours = hours_record
                         break
-                # If day is a string (individual day record)
-                elif isinstance(day_field, str):
-                    day = day_field.lower()
+                # If day is a string or enum (individual day record)
+                elif isinstance(day_field, (str, object)):  # Handle both string and enum
+                    day = str(day_field).lower()
                     if day == current_weekday:
+                        current_day_hours = hours_record
+                        break
+                # If using day_order (numeric 1-7)
+                elif day_order_field and current_day_number:
+                    if int(day_order_field) == current_day_number:
                         current_day_hours = hours_record
                         break
             
@@ -215,20 +228,40 @@ class WebhookService:
                 logger.info(f"No opening hours configured for {current_weekday}")
                 return False
             
-            start_time = current_day_hours.get('start_time', '')
-            end_time = current_day_hours.get('end_time', '')
+            start_time = current_day_hours.get('start_time')
+            end_time = current_day_hours.get('end_time')
+            break_start_time = current_day_hours.get('break_start_time')
+            break_end_time = current_day_hours.get('break_end_time')
             
             if not start_time or not end_time:
                 logger.warning(f"Incomplete opening hours for {current_weekday}: start={start_time}, end={end_time}")
                 return False
             
             logger.info(f"Business hours for {current_weekday}: {start_time} - {end_time}")
+            if break_start_time and break_end_time:
+                logger.info(f"Break time for {current_weekday}: {break_start_time} - {break_end_time}")
             
-            # Compare times (HH:MM format allows direct string comparison)
-            is_within_hours = start_time <= current_time_str <= end_time
-            
-            logger.info(f"Current time {current_time_str} within hours {start_time}-{end_time}: {is_within_hours}")
-            return is_within_hours
+            # Convert current time string to time object for comparison
+            try:
+                from datetime import datetime
+                current_time_obj = datetime.strptime(current_time_str, '%H:%M').time()
+                
+                # Check if within main business hours
+                is_within_hours = start_time <= current_time_obj <= end_time
+                
+                # If there's a break time, check if we're NOT in break
+                if break_start_time and break_end_time and is_within_hours:
+                    is_in_break = break_start_time <= current_time_obj <= break_end_time
+                    is_within_hours = not is_in_break
+                    if is_in_break:
+                        logger.info(f"Current time {current_time_str} is during break time {break_start_time}-{break_end_time}")
+                
+                logger.info(f"Current time {current_time_str} within business hours {start_time}-{end_time}: {is_within_hours}")
+                return is_within_hours
+                
+            except ValueError as e:
+                logger.error(f"Error parsing time {current_time_str}: {e}")
+                return False
             
         except Exception as e:
             logger.error(f"Error checking business hours: {e}")
@@ -305,14 +338,7 @@ class WebhookService:
                             lang_code = lang_resp.data[0].get('language_code', 'en')
                             dynamic_variables[f'agent_name_{lang_code}'] = agent_name
 
-            # Get caller language from the twilio_number record
-            if language_id:
-                lang_resp = self.supabase.table('language').select('language_code').eq('id', language_id).limit(1).execute()
-                if lang_resp.data:
-                    caller_language = lang_resp.data[0].get('language_code', 'en')
-                    dynamic_variables['caller_language'] = caller_language
-                    dynamic_variables['preferred_language'] = caller_language
-                    logger.info(f"Found caller language from twilio_number: {caller_language}")
+
 
             logger.info(f"Returning dynamic variables from Supabase: {list(dynamic_variables.keys())}")
             logger.info(f"=== SUPABASE LOOKUP END (async) ===")
@@ -695,8 +721,7 @@ class WebhookService:
 
     def _handle_call_started_event(self, data: Dict[str, Any]) -> None:
         """
-        Handle call_started events by creating records in retell_event and twilio_call tables
-        and linking them to caller records
+        Handle call_started events by updating existing retell_event record and creating twilio_call record
         
         Args:
             data: The webhook payload from Retell AI
@@ -721,36 +746,35 @@ class WebhookService:
             # Extract dynamic variables if present
             retell_llm_dynamic_variables = call_data.get('retell_llm_dynamic_variables', {})
             
-            logger.info(f"Creating database records for call_started event - Call ID: {call_id}, Twilio SID: {twilio_call_sid}")
+            # Get retell_event_id and caller_id from dynamic variables
+            retell_event_id = retell_llm_dynamic_variables.get('retell_event_id')
+            caller_id = retell_llm_dynamic_variables.get('caller_id')
             
-            # 1. Get or create caller record
-            caller_id = self._get_or_create_caller(from_number)
-            if not caller_id:
-                logger.error(f"Failed to get or create caller for: {from_number}")
+            logger.info(f"Updating retell_event for call_started event - Call ID: {call_id}, Retell Event ID: {retell_event_id}, Twilio SID: {twilio_call_sid}")
+            
+            if not retell_event_id:
+                logger.error("No retell_event_id found in dynamic variables")
                 return
             
-            # 2. Create retell_event record
-            retell_event_data = {
+            # 1. Update existing retell_event record
+            retell_event_update_data = {
                 'call_id': call_id,
                 'call_type': call_type,
                 'agent_id': agent_id,
                 'call_status': call_status,
-                'from_number': from_number,
-                'to_number': to_number,
-                'direction': direction,  # Add direction field
+                'direction': direction,
                 'retell_llm_dynamic_variables': retell_llm_dynamic_variables
             }
             
-            retell_response = self.supabase.table('retell_event').insert(retell_event_data).execute()
+            retell_response = self.supabase.table('retell_event').update(retell_event_update_data).eq('id', retell_event_id).execute()
             if hasattr(retell_response, 'error') and retell_response.error:
-                logger.error(f"Error creating retell_event record: {retell_response.error}")
+                logger.error(f"Error updating retell_event record: {retell_response.error}")
                 return
             
-            retell_event_id = retell_response.data[0]['id'] if retell_response.data else None
-            logger.info(f"Created retell_event record with ID: {retell_event_id}")
+            logger.info(f"Updated retell_event record with ID: {retell_event_id}")
             
-            # 3. Create twilio_call record (if we have a Twilio call SID)
-            if twilio_call_sid:
+            # 2. Create twilio_call record (if we have a Twilio call SID)
+            if twilio_call_sid and caller_id:
                 twilio_call_data = {
                     'call_sid': twilio_call_sid,
                     'from_number': from_number,
@@ -766,7 +790,10 @@ class WebhookService:
                 else:
                     logger.info(f"Created twilio_call record with ID: {twilio_response.data[0]['id'] if twilio_response.data else 'unknown'}")
             else:
-                logger.warning("No Twilio call SID found, skipping twilio_call record creation")
+                if not twilio_call_sid:
+                    logger.warning("No Twilio call SID found, skipping twilio_call record creation")
+                if not caller_id:
+                    logger.warning("No caller_id found in dynamic variables, skipping twilio_call record creation")
                 
         except Exception as e:
             logger.error(f"Error handling call_started event: {e}")
@@ -807,27 +834,36 @@ class WebhookService:
                 
                 logger.info(f"Processing inbound webhook - From: {from_number}, To: {to_number}, Agent: {agent_id}")
                 
-                # Check if caller is known (exists in caller table)
-                caller_known = False
-                if from_number:
-                    caller_resp = self.supabase.table('caller').select('id, is_customer').eq('phone_number', from_number).limit(1).execute()
-                    if caller_resp.data:
-                        caller_record = caller_resp.data[0]
-                        is_customer_value = caller_record.get('is_customer', 'unknown')
-                        # Consider caller "known" if they exist in the table
-                        caller_known = True
-                        logger.info(f"Caller found in database - is_customer: {is_customer_value}, known: {caller_known}")
-                    else:
-                        logger.info("Caller not found in database - will be created during call_started event")
+                # 1. Get or create caller record
+                caller_id = self._get_or_create_caller(from_number)
+                if not caller_id:
+                    logger.error(f"Failed to get or create caller for: {from_number}")
+                    return {'error': 'Failed to process caller'}, 500
                 
-                # Get customer data based on to_number (includes language info)
+                # 2. Create initial retell_event record
+                retell_event_data = {
+                    'from_number': from_number,
+                    'to_number': to_number,
+                    'agent_id': agent_id,
+                    'call_status': 'inbound',  # Initial status
+                    'direction': 'inbound'
+                }
+                
+                retell_response = self.supabase.table('retell_event').insert(retell_event_data).execute()
+                if hasattr(retell_response, 'error') and retell_response.error:
+                    logger.error(f"Error creating retell_event record: {retell_response.error}")
+                    return {'error': 'Failed to create call record'}, 500
+                
+                retell_event_id = retell_response.data[0]['id'] if retell_response.data else None
+                logger.info(f"Created retell_event record with ID: {retell_event_id}")
+                
+                # 3. Get customer data based on to_number
                 customer_data = self._get_customer_data(to_number)
-                # Note: customer_data is about the business/client, caller_known is about the person calling
                 
-                # Build dynamic variables
+                # 4. Build dynamic variables
                 dynamic_variables = {}
                 if customer_data:
-                    # Use customer data from Supabase (includes caller_language and preferred_language)
+                    # Use customer data from Supabase
                     dynamic_variables.update(customer_data)
                     logger.info(f"Using customer data for known customer: {list(customer_data.keys())}")
                 else:
@@ -836,19 +872,21 @@ class WebhookService:
                         'customer_name': 'Valued Customer',
                         'customer_id': 'unknown',
                         'account_type': 'standard',
-                        'preferred_language': 'en',
                         'client_name': 'Our Company'
                     }
                     logger.info("Using default variables for unknown customer")
                 
-                # Build metadata - focus on business value, not redundant data
+                # 5. Add retell_event_id and caller_id to dynamic variables
+                dynamic_variables['retell_event_id'] = retell_event_id
+                dynamic_variables['caller_id'] = caller_id
+                
+                # 6. Build metadata
                 metadata = {
                     'inbound_timestamp': datetime.now().isoformat(),
-                    'caller_known': caller_known,  # Focus on caller recognition
                     'phone_number_id': phone_number_id
                 }
                 
-                # Build response
+                # 7. Build response
                 response = {
                     'call_inbound': {
                         'dynamic_variables': dynamic_variables,
@@ -856,12 +894,12 @@ class WebhookService:
                     }
                 }
                 
-                # Add agent override if customer has a preferred agent
+                # 8. Add agent override if customer has a preferred agent
                 if customer_data and 'preferred_agent_id' in customer_data:
                     response['call_inbound']['override_agent_id'] = customer_data['preferred_agent_id']
                     logger.info(f"Overriding agent to: {customer_data['preferred_agent_id']}")
                 
-                logger.info(f"Inbound webhook processed successfully. Caller known: {caller_known}")
+                logger.info(f"Inbound webhook processed successfully. Retell Event ID: {retell_event_id}, Caller ID: {caller_id}")
                 return response
             else:
                 # For other events (call_started, call_ended, call_analyzed), just return success
@@ -877,7 +915,6 @@ class WebhookService:
                         'customer_name': 'Valued Customer',
                         'customer_id': 'unknown',
                         'account_type': 'standard',
-                        'preferred_language': 'en',
                         'client_name': 'Our Company'
                     },
                     'metadata': {

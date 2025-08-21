@@ -1,3 +1,0 @@
-[33m45ce214[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Add client_id to dynamic variables for function calls
-[33m432aac9[m[33m ([m[1;31morigin/main[m[33m)[m Add business hours webhook endpoint
-[33m4554d03[m Add call_status update, direction field, and node transcript logging
