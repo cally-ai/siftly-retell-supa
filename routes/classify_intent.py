@@ -15,7 +15,7 @@ classify_bp = Blueprint("classify_bp", __name__)
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 CLASSIFY_MODEL = os.getenv("CLASSIFY_MODEL", "anthropic/claude-3.5-sonnet")
 TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "openai/gpt-4o-mini")
-TOP_K = int(os.getenv("TOP_K", "7"))
+TOP_K = int(os.getenv("TOP_K", "5"))
 
 # --- KB Prefetch Configuration ---
 GENERAL_ACTION_POLICY = os.getenv("GENERAL_ACTION_POLICY", "answer_from_kb")
@@ -427,12 +427,12 @@ REQUIRED JSON SCHEMA:
     user_message = f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'
     
     print(f"=== OPENAI REQUEST ===")
-    print(f"Model: gpt-4o-mini")
+    print(f"Model: gpt-3.5-turbo")
     
     try:
         print(f"Starting OpenAI API call at {time.time()}")
         resp = get_openai_client().chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message}
@@ -484,7 +484,7 @@ REQUIRED JSON SCHEMA:
             "alternatives": [],
             "explanation": parsed.get("explanation", ""),
             "latency_ms": latency_ms,
-            "model": "gpt-4o-mini",
+            "model": "gpt-3.5-turbo",
             "request_id": getattr(resp, "id", None),
             "prompt_tokens": getattr(getattr(resp, "usage", None), "prompt_tokens", None),
             "completion_tokens": getattr(getattr(resp, "usage", None), "completion_tokens", None)
@@ -505,7 +505,7 @@ REQUIRED JSON SCHEMA:
                 "clarify_question": "",
                 "alternatives": [],
                 "latency_ms": int((time.time() - t0) * 1000),
-                "model": "gpt-4o-mini",
+                "model": "gpt-3.5-turbo",
                 "request_id": None,
                 "prompt_tokens": None,
                 "completion_tokens": None,
@@ -520,7 +520,7 @@ REQUIRED JSON SCHEMA:
                 "clarify_question": "I'm having trouble understanding. Could you please repeat that?",
                 "alternatives": [],
                 "latency_ms": int((time.time() - t0) * 1000),
-                "model": "gpt-4o-mini",
+                "model": "gpt-3.5-turbo",
                 "request_id": None,
                 "prompt_tokens": None,
                 "completion_tokens": None,
