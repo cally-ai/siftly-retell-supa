@@ -789,8 +789,9 @@ def classify_intent():
             "explanation": cls.get("explanation", ""),  # Add the AI explanation
             "unmatched_intent": not bool(candidates)  # Flag for unmatched intents
         }).execute()
-    except Exception:
-        pass
+        print(f"Successfully logged call_reason_log for call_id: {call_id}")
+    except Exception as e:
+        print(f"Failed to log call_reason_log for call_id {call_id}: {e}")
 
     # 7) Build result (must be STRING)
     result_obj = {
