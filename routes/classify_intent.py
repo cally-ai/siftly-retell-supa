@@ -429,45 +429,34 @@ REQUIRED JSON SCHEMA:
     
     try:
         resp = get_or_client().chat.completions.create(
-            model=CLASSIFY_MODEL,
-            messages=[
+        model=CLASSIFY_MODEL,
+        messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message}
-            ],
-            response_format={"type": "json_schema", "json_schema": schema}
-        )
-        latency_ms = int((time.time() - t0) * 1000)
-        content = (resp.choices[0].message.content or "{}").strip()
+        ],
+        response_format={"type": "json_schema", "json_schema": schema}
+    )
+    latency_ms = int((time.time() - t0) * 1000)
+    content = (resp.choices[0].message.content or "{}").strip()
         
         # Debug logging
         print(f"OpenRouter response content: '{content}'")
         print(f"OpenRouter response length: {len(content)}")
-        print(f"Response starts with '{{': {content.startswith('{')}")
-        print(f"Response ends with '}}': {content.endswith('}')}")
-        print(f"Response contains '}}': {'}' in content}")
         
         if not content or content.strip() == "":
             raise ValueError("Empty response from OpenRouter API")
         
         # Try to parse the JSON response
         try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError as json_error:
-            print(f"JSON decode error: {json_error}")
-            print(f"Content that failed to parse: '{content}'")
+    parsed = json.loads(content)
+        except json.JSONDecodeError:
             # If that fails, try to find the JSON object in the response
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
-                try:
-                    parsed = json.loads(json_str)
-                    print(f"Successfully extracted JSON with regex: '{json_str}'")
-                except json.JSONDecodeError as regex_error:
-                    print(f"Regex extraction also failed: {regex_error}")
-                    raise ValueError(f"Could not extract valid JSON from response. Original error: {json_error}")
+                parsed = json.loads(json_str)
             else:
-                print(f"No JSON object found in content: '{content}'")
-                raise ValueError(f"Could not extract valid JSON from response. Original error: {json_error}")
+                raise ValueError("Could not extract valid JSON from response")
         
         # Validate intent ID format
         intent_id = parsed.get("intent", "")
@@ -728,9 +717,9 @@ def classify_intent():
                 "top_k_results": top,  # Log the vector search results for analysis
                 "query_text": _redact_pii(query_en or ctx_en)  # Log the query that failed to match
             }).execute()
-            print(f"Successfully logged unmatched intent to call_reason_log for call_id: {call_id}")
+            print(f"Logged unmatched intent to call_reason_log for call_id: {call_id}")
         except Exception as e:
-            print(f"Failed to log unmatched intent for call_id {call_id}: {e}")
+            print(f"Failed to log unmatched intent: {e}")
         
         # Return a fallback response for unmatched intents
         return jsonify({
@@ -778,7 +767,7 @@ def classify_intent():
         # 6) Log (rich but safe)
     call_id = _resolve_call_id(provided_call_id, retell_event_id)
         try:
-            get_supabase_client().table("call_reason_log").insert({
+        get_supabase_client().table("call_reason_log").insert({
                 "client_id": client_id,
                 "call_id": call_id,
                 "primary_intent_id": (best_row or {}).get("id"),
@@ -794,15 +783,14 @@ def classify_intent():
                 "prompt_tokens": cls.get("prompt_tokens"),
                 "completion_tokens": cls.get("completion_tokens"),
                 "router_version": "v1",
-                "utterance": _redact_pii(context_text),
+            "utterance": _redact_pii(context_text),
                 "detected_lang": (caller_language.lower() or None),
-                "utterance_en": _redact_pii(ctx_en),
-                "explanation": cls.get("explanation", ""),  # Add the AI explanation
-                "unmatched_intent": not bool(candidates)  # Flag for unmatched intents
+            "utterance_en": _redact_pii(ctx_en),
+            "explanation": cls.get("explanation", ""),  # Add the AI explanation
+            "unmatched_intent": not bool(candidates)  # Flag for unmatched intents
             }).execute()
-            print(f"Successfully logged call_reason_log for call_id: {call_id}")
-        except Exception as e:
-            print(f"Failed to log call_reason_log for call_id {call_id}: {e}")
+        except Exception:
+            pass
 
         # 7) Build result (must be STRING)
         result_obj = {
