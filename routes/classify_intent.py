@@ -427,12 +427,12 @@ REQUIRED JSON SCHEMA:
     user_message = f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'
     
     print(f"=== OPENAI REQUEST ===")
-    print(f"Model: gpt-3.5-turbo")
+    print(f"Model: gpt-4o-mini")
     
     try:
         print(f"Starting OpenAI API call at {time.time()}")
         resp = get_openai_client().chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message}
@@ -484,7 +484,7 @@ REQUIRED JSON SCHEMA:
             "alternatives": [],
             "explanation": parsed.get("explanation", ""),
             "latency_ms": latency_ms,
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-4o-mini",
             "request_id": getattr(resp, "id", None),
             "prompt_tokens": getattr(getattr(resp, "usage", None), "prompt_tokens", None),
             "completion_tokens": getattr(getattr(resp, "usage", None), "completion_tokens", None)
@@ -505,7 +505,7 @@ REQUIRED JSON SCHEMA:
                 "clarify_question": "",
                 "alternatives": [],
                 "latency_ms": int((time.time() - t0) * 1000),
-                "model": "gpt-3.5-turbo",
+                "model": "gpt-4o-mini",
                 "request_id": None,
                 "prompt_tokens": None,
                 "completion_tokens": None,
@@ -520,7 +520,7 @@ REQUIRED JSON SCHEMA:
                 "clarify_question": "I'm having trouble understanding. Could you please repeat that?",
                 "alternatives": [],
                 "latency_ms": int((time.time() - t0) * 1000),
-                "model": "gpt-3.5-turbo",
+                "model": "gpt-4o-mini",
                 "request_id": None,
                 "prompt_tokens": None,
                 "completion_tokens": None,
