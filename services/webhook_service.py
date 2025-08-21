@@ -328,25 +328,42 @@ class WebhookService:
             # Get client language agent names using the new structure
             if client_ivr_language_configuration_id:
                 # Get all languages for this client's IVR configuration
-                language_config_resp = self.supabase.table('client_ivr_language_configuration_language').select('language_id').eq('client_id', client_id).eq('client_ivr_language_configuration_id', client_ivr_language_configuration_id).execute()
+                ivr_lang_resp = self.supabase.table('client_ivr_language_configuration_language').select(
+                    'language_id'
+                ).eq('client_id', client_id).eq('client_ivr_language_configuration_id', client_ivr_language_configuration_id).execute()
                 
-                if language_config_resp.data:
+                if ivr_lang_resp.data:
                     # Get agent names for each language
-                    agent_names_resp = self.supabase.table('client_language_agent_name').select('language_id, agent_name').eq('client_id', client_id).execute()
-                    
-                    if agent_names_resp.data:
-                        for agent_record in agent_names_resp.data:
-                            agent_language_id = agent_record.get('language_id')
-                            agent_name = agent_record.get('agent_name')
+                    for lang_record in ivr_lang_resp.data:
+                        language_id = lang_record.get('language_id')
+                        if language_id:
+                            # Get agent name for this language
+                            agent_resp = self.supabase.table('client_language_agent_name').select(
+                                'agent_name'
+                            ).eq('client_id', client_id).eq('language_id', language_id).limit(1).execute()
                             
-                            # Check if this language is in the client's IVR configuration
-                            if agent_language_id and agent_name and any(lang.get('language_id') == agent_language_id for lang in language_config_resp.data):
-                                # Get language code for the key
-                                lang_resp = self.supabase.table('language').select('language_code').eq('id', agent_language_id).limit(1).execute()
-                                if lang_resp.data:
-                                    lang_code = lang_resp.data[0].get('language_code', 'en')
-                                    dynamic_variables[f'agent_name_{lang_code}'] = agent_name
-                                    logger.info(f"Added agent name for language {lang_code}: {agent_name}")
+                            if agent_resp.data:
+                                agent_name = agent_resp.data[0].get('agent_name')
+                                if agent_name:
+                                    # Get language code for the key
+                                    lang_resp = self.supabase.table('language').select('language_code').eq('id', language_id).limit(1).execute()
+                                    if lang_resp.data:
+                                        lang_code = lang_resp.data[0].get('language_code', 'en')
+                                        dynamic_variables[f'agent_name_{lang_code}'] = agent_name
+                                        logger.info(f"Added agent_name_{lang_code}: {agent_name}")
+            else:
+                # Fallback: Get all agent names for the client (old method)
+                agent_names_resp = self.supabase.table('client_language_agent_name').select('language_id, agent_name').eq('client_id', client_id).execute()
+                if agent_names_resp.data:
+                    for agent_record in agent_names_resp.data:
+                        agent_language_id = agent_record.get('language_id')
+                        agent_name = agent_record.get('agent_name')
+                        if agent_language_id and agent_name:
+                            # Get language code for the key
+                            lang_resp = self.supabase.table('language').select('language_code').eq('id', agent_language_id).limit(1).execute()
+                            if lang_resp.data:
+                                lang_code = lang_resp.data[0].get('language_code', 'en')
+                                dynamic_variables[f'agent_name_{lang_code}'] = agent_name
 
 
 
