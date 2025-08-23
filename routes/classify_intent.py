@@ -7,7 +7,13 @@ from supabase import create_client, Client
 from openai import OpenAI
 from config import Config
 from utils.intents import get_general_question_intent_id
-from vector_index import VectorIndexManager
+try:
+    from vector_index import VectorIndexManager
+    VECTOR_INDEX_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: vector_index module not available: {e}")
+    VECTOR_INDEX_AVAILABLE = False
+    VectorIndexManager = None
 
 def _now_ms():
     """Get current time in milliseconds"""
@@ -27,6 +33,8 @@ _vector_mgr: Optional[VectorIndexManager] = None
 
 def get_vector_mgr() -> VectorIndexManager:
     global _vector_mgr
+    if not VECTOR_INDEX_AVAILABLE:
+        return None
     if _vector_mgr is None:
         try:
             _vector_mgr = VectorIndexManager(get_supabase_client())
