@@ -943,11 +943,21 @@ def classify_intent():
             }
 
             if routing and (not is_general):
+                action_policy = routing.get("action_policy")
                 result_obj.update({
-                    "action_policy": routing.get("action_policy"),
+                    "action_policy": action_policy,
                     "transfer_number": routing.get("transfer_number"),
                     "category_name": routing.get("category_name")
                 })
+                
+                # Generate empathetic acknowledgment for transactional intents
+                if action_policy in ["route_to_agent", "collect_contact", "ask_urgency_then_collect"]:
+                    result_obj["acknowledgment_text"] = generate_acknowledgment(
+                        ctx_en or query_en or "",  # Use the English utterance
+                        result_obj.get("intent_name", ""),
+                        action_policy,
+                        target_lang
+                    )
 
             return jsonify(result_obj)
     
