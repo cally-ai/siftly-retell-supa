@@ -1214,6 +1214,7 @@ def health_vector_index():
         import hnswlib
         hnswlib_version = hnswlib.__version__
         hnswlib_available = True
+        hnswlib_error = None
     except ImportError as e:
         hnswlib_version = None
         hnswlib_available = False
@@ -1223,24 +1224,35 @@ def health_vector_index():
         import numpy
         numpy_version = numpy.__version__
         numpy_available = True
+        numpy_error = None
     except ImportError as e:
         numpy_version = None
         numpy_available = False
         numpy_error = str(e)
     
+    try:
+        vector_index_available = VECTOR_INDEX_AVAILABLE
+    except:
+        vector_index_available = False
+    
+    try:
+        vector_mgr_initialized = _vector_mgr is not None
+    except:
+        vector_mgr_initialized = False
+    
     return jsonify({
         "hnswlib": {
             "available": hnswlib_available,
             "version": hnswlib_version,
-            "error": hnswlib_error if not hnswlib_available else None
+            "error": hnswlib_error
         },
         "numpy": {
             "available": numpy_available,
             "version": numpy_version,
-            "error": numpy_error if not numpy_available else None
+            "error": numpy_error
         },
-        "vector_index_available": VECTOR_INDEX_AVAILABLE,
-        "vector_mgr_initialized": _vector_mgr is not None
+        "vector_index_available": vector_index_available,
+        "vector_mgr_initialized": vector_mgr_initialized
     })
 
 @classify_bp.route("/refresh-index", methods=["POST"])
