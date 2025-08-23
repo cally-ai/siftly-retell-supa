@@ -849,6 +849,7 @@ def classify_intent():
     
     t1 = _now_ms()
     vector_mgr = get_vector_mgr()
+    vector_index_used = "hnsw" if vector_mgr is not None else "fallback"
     if vector_mgr is not None:
         top = vector_mgr.topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
     else:
@@ -920,6 +921,7 @@ def classify_intent():
                     "embed_ms": embed_ms,
                     "ann_ms": ann_ms,
                     "llm_ms": 0,
+                    "vector_index_used": vector_index_used,
                     "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
                 }
             }
@@ -974,6 +976,7 @@ def classify_intent():
                 "embed_ms": embed_ms,
                 "ann_ms": ann_ms,
                 "llm_ms": 0,
+                "vector_index_used": vector_index_used,
                 "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
             }
         })
@@ -1131,6 +1134,7 @@ def classify_intent():
             "embed_ms": embed_ms,
             "ann_ms": ann_ms,
             "llm_ms": llm_ms,
+            "vector_index_used": vector_index_used,
             "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
         }
     }
@@ -1202,6 +1206,42 @@ def classify_intent():
 
 # Simple rate limiting for refresh endpoint
 _refresh_attempts = {}  # client_id -> (count, reset_time)
+
+@classify_bp.route("/health/vector-index", methods=["GET"])
+def health_vector_index():
+    """Health check for vector index dependencies"""
+    try:
+        import hnswlib
+        hnswlib_version = hnswlib.__version__
+        hnswlib_available = True
+    except ImportError as e:
+        hnswlib_version = None
+        hnswlib_available = False
+        hnswlib_error = str(e)
+    
+    try:
+        import numpy
+        numpy_version = numpy.__version__
+        numpy_available = True
+    except ImportError as e:
+        numpy_version = None
+        numpy_available = False
+        numpy_error = str(e)
+    
+    return jsonify({
+        "hnswlib": {
+            "available": hnswlib_available,
+            "version": hnswlib_version,
+            "error": hnswlib_error if not hnswlib_available else None
+        },
+        "numpy": {
+            "available": numpy_available,
+            "version": numpy_version,
+            "error": numpy_error if not numpy_available else None
+        },
+        "vector_index_available": VECTOR_INDEX_AVAILABLE,
+        "vector_mgr_initialized": _vector_mgr is not None
+    })
 
 @classify_bp.route("/refresh-index", methods=["POST"])
 def refresh_index():
