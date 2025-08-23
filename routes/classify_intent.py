@@ -851,11 +851,20 @@ def classify_intent():
     vector_mgr = get_vector_mgr()
     vector_index_used = "hnsw" if vector_mgr is not None else "fallback"
     if vector_mgr is not None:
+        t_ann_start = _now_ms()
         top = vector_mgr.topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
+        ann_ms = _now_ms() - t_ann_start
+        print(f"[ANN] used=hnsw topk_len={len(top)} ann_ms={ann_ms}")
     else:
         # Fallback to original match_topk if vector index manager failed
+        t_ann_start = _now_ms()
         top = match_topk(client_id, vec, TOP_K)
-    ann_ms = _now_ms() - t1  # ANN (HNSW) latency
+        ann_ms = _now_ms() - t_ann_start
+        print(f"[ANN] used=fallback topk_len={len(top)} ann_ms={ann_ms}")
+    
+    # Validate query vector dimensions
+    if len(vec) != 1536:
+        print(f"[ANN] bad query dims: {len(vec)}")
     intent_ids = [t["intent_id"] for t in top]
     intents = load_intents(intent_ids)
     candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
