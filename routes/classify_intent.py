@@ -9,6 +9,10 @@ from config import Config
 from utils.intents import get_general_question_intent_id
 from vector_index import VectorIndexManager
 
+def _now_ms():
+    """Get current time in milliseconds"""
+    return int(time.time() * 1000)
+
 # --- Blueprint dedicated to this feature ---
 classify_bp = Blueprint("classify_bp", __name__)
 
@@ -816,7 +820,8 @@ def classify_intent():
     # 3) Embed + shortlist (use sharp query text)
     if not (query_en or ctx_en):
         return jsonify({"error": "No usable text to embed/classify"}), 400
-        
+    
+    t0 = _now_ms()
     vec, embed_ms, emb_model = embed_english(query_en or ctx_en or "")
     
     # L2-normalize query vector to match index expectations
@@ -827,7 +832,10 @@ def classify_intent():
         return (a / n).tolist()
     
     vec = _l2(vec)
+    
+    t1 = _now_ms()
     top = get_vector_mgr().topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
+    ann_ms = _now_ms() - t1  # ANN (HNSW) latency
     intent_ids = [t["intent_id"] for t in top]
     intents = load_intents(intent_ids)
     candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
@@ -890,6 +898,9 @@ def classify_intent():
                 "clarify_question": "",
                 "telemetry": {
                     "embedding_top1_sim": sim0,
+                    "embed_ms": embed_ms,
+                    "ann_ms": ann_ms,
+                    "llm_ms": 0,
                     "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
                 }
             }
@@ -941,6 +952,9 @@ def classify_intent():
             "clarify_question": "Could you tell me a bit more about what you need help with?",
             "telemetry": {
                 "embedding_top1_sim": top[0]["similarity"] if top else None,
+                "embed_ms": embed_ms,
+                "ann_ms": ann_ms,
+                "llm_ms": 0,
                 "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
             }
         })
@@ -1023,7 +1037,9 @@ def classify_intent():
     # 4) Classify (use richer context) - Try OpenAI first, fallback to OpenRouter
     try:
         print("Attempting OpenAI classification...")
+        llm_start = _now_ms()
         cls = classify_with_openai(ctx_en or query_en or "", candidates, target_lang, cta_yes)
+        llm_ms = _now_ms() - llm_start
         print("OpenAI classification successful")
     except Exception as e:
         print(f"OpenAI classification failed: {e}")
@@ -1093,6 +1109,9 @@ def classify_intent():
         "clarify_question": clarify_q if needs else "",
         "telemetry": {
             "embedding_top1_sim": (top[0]["similarity"] if top else None),
+            "embed_ms": embed_ms,
+            "ann_ms": ann_ms,
+            "llm_ms": llm_ms,
             "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
         }
     }
