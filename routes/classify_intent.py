@@ -1298,14 +1298,62 @@ def refresh_index():
 @classify_bp.route("/index-stats/<client_id>", methods=["GET"])
 def index_stats(client_id):
     """Get stats about the local vector index for a client"""
-    ci = get_vector_mgr()._by_client.get(client_id)
-    if not ci:
-        return jsonify({"built": False, "size": 0, "ef": 64, "M": 32})
-    with ci._lock:
-        return jsonify({
-            "built": ci._built, 
-            "size": len(ci.intent_ids),
-            "ef": 64,
-            "M": 32,
-            "last_refresh": get_vector_mgr()._client_versions.get(client_id)
-        })
+    try:
+        vector_mgr = get_vector_mgr()
+        if vector_mgr is None:
+            return jsonify({"error": "Vector index manager not available"}), 500
+        
+        ci = vector_mgr._by_client.get(client_id)
+        payload = {
+            "hnsw_ok": getattr(__import__('vector_index'), 'HNSW_OK', True),
+            "last_refresh_at": getattr(vector_mgr, "_last_refresh_at", 0)
+        }
+        
+        if not ci:
+            payload.update({"built": False, "size": 0, "ef": 64, "M": 32})
+            return jsonify(payload)
+        
+        with ci._lock:
+            payload.update({
+                "built": ci._built, 
+                "size": len(ci.intent_ids),
+                "ef": 64,
+                "M": 32,
+                "last_refresh": vector_mgr._client_versions.get(client_id)
+            })
+            return jsonify(payload)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@classify_bp.route("/debug-embedding/<client_id>", methods=["GET"])
+def debug_embedding(client_id):
+    """Debug endpoint to peek at embedding data format"""
+    token = request.headers.get("X-Index-Admin-Token")
+    if token != os.getenv("INDEX_ADMIN_TOKEN"):
+        return jsonify({"error":"unauthorized"}), 401
+    
+    try:
+        rows = get_supabase_client().table("intent_embedding") \
+            .select("intent_id,embedding").eq("client_id", client_id).limit(1).execute()
+        row = (rows.data or [None])[0]
+        if not row:
+            return jsonify({"ok": False, "reason":"no rows"})
+        
+        from vector_index import _coerce_vec_any
+        try:
+            v = _coerce_vec_any(row["embedding"])
+            return jsonify({
+                "ok": True, 
+                "intent_id": row["intent_id"], 
+                "dims": len(v), 
+                "head3": v[:3],
+                "raw_type": str(type(row["embedding"]))
+            })
+        except Exception as e:
+            return jsonify({
+                "ok": False, 
+                "error": str(e), 
+                "raw_type": str(type(row["embedding"]))
+            })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

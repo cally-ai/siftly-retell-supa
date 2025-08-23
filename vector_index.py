@@ -1,4 +1,5 @@
 import os
+import json
 import numpy as np
 import threading
 import time
@@ -13,6 +14,36 @@ except Exception as e:
     HNSW_OK = False
     print(f"[HNSW] import failed: {e}")
     hnswlib = None
+
+def _coerce_vec_any(v, dim=1536):
+    """Coerce any embedding shape (list/tuple/np/string) and validate length"""
+    # Already a list/tuple?
+    if isinstance(v, (list, tuple)):
+        arr = [float(x) for x in v]
+    elif isinstance(v, str):
+        s = v.strip()
+        try:
+            # pgvector via PostgREST usually returns JSON-like "[...]" -> json.loads
+            if s.startswith('['):
+                arr = [float(x) for x in json.loads(s)]
+            elif s.startswith('(') and s.endswith(')'):
+                # handle "(v1,v2,...)" -> split
+                arr = [float(x) for x in s[1:-1].split(',')]
+            else:
+                # last resort: try json.loads anyway
+                arr = [float(x) for x in json.loads(s)]
+        except Exception as e:
+            raise ValueError(f"cannot parse embedding string: {e}")
+    else:
+        # numpy or other
+        try:
+            arr = np.asarray(v, dtype="float32").tolist()
+        except Exception as e:
+            raise ValueError(f"unsupported embedding type {type(v)}: {e}")
+
+    if len(arr) != dim:
+        raise ValueError(f"bad embed length: got {len(arr)} expected {dim}")
+    return arr
 
 DIM = 1536  # text-embedding-3-small
 M = 32      # graph degree
@@ -59,7 +90,7 @@ class ClientIndex:
 
             # Validate and coerce vectors
             try:
-                clean = [(iid, self._coerce_vec(vec)) for iid, vec in embeddings]
+                clean = [(iid, _coerce_vec_any(vec, DIM)) for iid, vec in embeddings]
                 vecs = np.asarray([e[1] for e in clean], dtype=np.float32)
                 print(f"[HNSW] rebuild(): validated {len(clean)} vectors, shape: {vecs.shape}")
             except Exception as e:
@@ -78,15 +109,7 @@ class ClientIndex:
             self._built = True
             print(f"[HNSW] rebuild(): success, built index with {len(self.intent_ids)} vectors")
 
-    def _coerce_vec(self, v):
-        """Flatten and validate vector dimensions"""
-        # Flatten once if needed
-        if isinstance(v, (list, tuple)) and len(v) == 1 and isinstance(v[0], (list, tuple)):
-            v = v[0]
-        v = [float(x) for x in v]
-        if len(v) != DIM:
-            raise ValueError(f"bad embed length: got {len(v)} expected {DIM}")
-        return v
+
 
     def topk(self, vec: List[float], k: int) -> List[Tuple[str, float]]:
         with self._lock:
@@ -116,9 +139,16 @@ class VectorIndexManager:
         print(f"[HNSW] warm(): fetched {len(rows)} rows")
         
         per_client: Dict[str, List[Tuple[str, List[float]]]] = {}
+        bad = 0
         for r in rows:
-            cid = r["client_id"]
-            per_client.setdefault(cid, []).append((r["intent_id"], r["embedding"]))
+            try:
+                vec = _coerce_vec_any(r["embedding"], DIM)
+                per_client.setdefault(r["client_id"], []).append((r["intent_id"], vec))
+            except Exception as e:
+                bad += 1
+                print(f"[HNSW] warm(): skipped malformed embedding: {e}")
+        if bad:
+            print(f"[HNSW] warm(): skipped {bad} malformed embeddings")
             
         with self._lock:
             for cid, emb in per_client.items():
@@ -130,8 +160,20 @@ class VectorIndexManager:
         print("[HNSW] warm(): done")
 
     def refresh_client(self, client_id: str):
+        print(f"[HNSW] refresh_client({client_id})")
         rows = self._fetch_embeddings_for(client_id)
-        emb = [(r["intent_id"], r["embedding"]) for r in rows]
+        ok = 0; bad = 0
+        emb = []
+        for r in rows:
+            try:
+                vec = _coerce_vec_any(r["embedding"], DIM)
+                emb.append((r["intent_id"], vec))
+                ok += 1
+            except Exception as e:
+                bad += 1
+                print(f"[HNSW] refresh_client: skipped malformed embedding: {e}")
+        print(f"[HNSW] refresh_client: ok={ok} bad={bad}")
+
         with self._lock:
             ci = self._by_client.get(client_id) or ClientIndex()
             ci.rebuild(emb)
@@ -174,12 +216,8 @@ class VectorIndexManager:
             with self._lock:
                 ci = self._by_client.get(client_id)
             if not ci:
-                print(f"[HNSW] topk(): client {client_id} not built -> returning []")
+                print(f"[HNSW] topk(): still no index for {client_id}")
                 return []
-        
-        if not ci._built:
-            print(f"[HNSW] topk(): client {client_id} not built -> returning []")
-            return []
         
         pairs = ci.topk(vec, k)
         return [{"intent_id": iid, "similarity": sim} for iid, sim in pairs]
