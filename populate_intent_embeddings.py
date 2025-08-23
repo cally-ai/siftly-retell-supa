@@ -102,8 +102,7 @@ def main():
             supabase.table("intent_embedding").upsert({
                 "client_id": intent["client_id"],
                 "intent_id": intent["id"],
-                "embedding": embedding,  # Pass list directly
-                "updated_at": "now()"
+                "embedding": embedding  # Pass list directly
             }).execute()
             
             success_count += 1

@@ -58,6 +58,7 @@ class VectorIndexManager:
         self._lock = threading.RLock()
         self._by_client: Dict[str, ClientIndex] = {}
         self._last_refresh_at = 0
+        self._client_versions: Dict[str, str] = {}  # client_id -> last_updated_at
 
     def warm(self):
         # Load all embeddings grouped by client
@@ -80,10 +81,37 @@ class VectorIndexManager:
             ci = self._by_client.get(client_id) or ClientIndex()
             ci.rebuild(emb)
             self._by_client[client_id] = ci
+            
+        # Update version timestamp
+        try:
+            row = self.sb.table("intent_embedding").select("updated_at").eq("client_id", client_id).order("updated_at", desc=True).limit(1).single().execute()
+            if not (hasattr(row, "error") and row.error) and row.data:
+                self._client_versions[client_id] = row.data["updated_at"]
+        except Exception:
+            pass
+
+    def _needs_refresh(self, client_id: str) -> bool:
+        """Check if client index needs refresh based on version"""
+        try:
+            row = self.sb.table("intent_embedding").select("updated_at").eq("client_id", client_id).order("updated_at", desc=True).limit(1).single().execute()
+            if hasattr(row, "error") and row.error:
+                return True
+            db_ts = row.data["updated_at"] if row.data else None
+            cached = self._client_versions.get(client_id)
+            return cached is None or (db_ts and db_ts > cached)
+        except Exception:
+            return True
 
     def topk(self, client_id: str, vec: List[float], k: int) -> List[Dict]:
         with self._lock:
             ci = self._by_client.get(client_id)
+        
+        # Check if refresh is needed (version-based)
+        if self._needs_refresh(client_id):
+            self.refresh_client(client_id)
+            with self._lock:
+                ci = self._by_client.get(client_id)
+        
         if not ci:
             # lazy build if needed
             self.refresh_client(client_id)
@@ -91,6 +119,7 @@ class VectorIndexManager:
                 ci = self._by_client.get(client_id)
             if not ci:
                 return []
+        
         pairs = ci.topk(vec, k)
         return [{"intent_id": iid, "similarity": sim} for iid, sim in pairs]
 

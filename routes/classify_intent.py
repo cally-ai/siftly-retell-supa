@@ -839,6 +839,7 @@ def classify_intent():
     # Early-exit thresholds (skip LLM for obvious matches)
     EARLY_SIM_THRESH = 0.92
     EARLY_MARGIN = 0.08
+    LOW_SIM_FLOOR = 0.55  # Skip LLM if all similarities below this
     
     if top:
         sim0 = top[0]["similarity"]
@@ -861,8 +862,8 @@ def classify_intent():
                     "client_id": client_id,
                     "call_id": call_id,
                     "primary_intent_id": (best_row or {}).get("id"),
-                    "confidence": sim0,  # cosine similarity
-                    "embedding_top1_sim": sim0,
+                    "confidence": 0.95,  # High confidence for early exit
+                    "embedding_top1_sim": sim0,  # Keep cosine similarity separate
                     "alternatives": [],
                     "clarifications_json": [],
                     "llm_model": "skipped-early-exit",
@@ -884,7 +885,7 @@ def classify_intent():
                 "call_id": call_id,
                 "intent_id": best_id,
                 "intent_name": next((i["name"] for i in intents if i["id"] == best_id), "General Question" if is_general else None),
-                "confidence": sim0,
+                "confidence": 0.95,  # High confidence for early exit
                 "needs_clarification": "no",
                 "clarify_question": "",
                 "telemetry": {
@@ -901,6 +902,48 @@ def classify_intent():
                 })
 
             return jsonify(result_obj)
+    
+    # Skip LLM on poor candidate sets
+    if not top or top[0]["similarity"] < LOW_SIM_FLOOR:
+        call_id = _resolve_call_id(provided_call_id, retell_event_id)
+        
+        # Log low similarity case
+        try:
+            get_supabase_client().table("call_reason_log").insert({
+                "client_id": client_id,
+                "call_id": call_id,
+                "primary_intent_id": None,
+                "confidence": 0.0,
+                "embedding_top1_sim": top[0]["similarity"] if top else None,
+                "alternatives": [],
+                "clarifications_json": [{"asked": True}],
+                "llm_model": "skipped-low-similarity",
+                "embedding_model": emb_model,
+                "llm_latency_ms": 0,
+                "embed_latency_ms": embed_ms,
+                "router_version": "v1",
+                "utterance": _redact_pii(context_text),
+                "detected_lang": (caller_language.lower() or None),
+                "utterance_en": _redact_pii(ctx_en),
+                "explanation": "Low similarity - no clear intent match",
+                "unmatched_intent": True
+            }).execute()
+            print(f"Successfully logged low-similarity case for call_id: {call_id}")
+        except Exception as e:
+            print(f"Failed to log low-similarity case: {e}")
+
+        return jsonify({
+            "call_id": call_id,
+            "intent_id": None,
+            "intent_name": None,
+            "confidence": 0.0,
+            "needs_clarification": "yes",
+            "clarify_question": "Could you tell me a bit more about what you need help with?",
+            "telemetry": {
+                "embedding_top1_sim": top[0]["similarity"] if top else None,
+                "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
+            }
+        })
     
     # ensure General Question is a candidate, even if vector shortlist didn't return it
     if general_question_id and not any(c["id"] == general_question_id for c in candidates):
@@ -1119,6 +1162,9 @@ def classify_intent():
 
     return jsonify(result_obj)
 
+# Simple rate limiting for refresh endpoint
+_refresh_attempts = {}  # client_id -> (count, reset_time)
+
 @classify_bp.route("/refresh-index", methods=["POST"])
 def refresh_index():
     """Refresh the local vector index for a specific client"""
@@ -1131,6 +1177,19 @@ def refresh_index():
     if not client_id:
         return jsonify({"error": "missing client_id"}), 400
     
+    # Rate limiting: max 5 refreshes per client per minute
+    current_time = time.time()
+    if client_id in _refresh_attempts:
+        count, reset_time = _refresh_attempts[client_id]
+        if current_time < reset_time:
+            if count >= 5:
+                return jsonify({"error": "rate limit exceeded"}), 429
+            _refresh_attempts[client_id] = (count + 1, reset_time)
+        else:
+            _refresh_attempts[client_id] = (1, current_time + 60)
+    else:
+        _refresh_attempts[client_id] = (1, current_time + 60)
+    
     try:
         get_vector_mgr().refresh_client(client_id)
         return jsonify({"ok": True, "client_id": client_id})
@@ -1142,6 +1201,12 @@ def index_stats(client_id):
     """Get stats about the local vector index for a client"""
     ci = get_vector_mgr()._by_client.get(client_id)
     if not ci:
-        return jsonify({"built": False, "size": 0})
+        return jsonify({"built": False, "size": 0, "ef": 64, "M": 32})
     with ci._lock:
-        return jsonify({"built": ci._built, "size": len(ci.intent_ids)})
+        return jsonify({
+            "built": ci._built, 
+            "size": len(ci.intent_ids),
+            "ef": 64,
+            "M": 32,
+            "last_refresh": get_vector_mgr()._client_versions.get(client_id)
+        })
