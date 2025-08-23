@@ -9,6 +9,9 @@ from supabase import Client as SupabaseClient
 
 log = logging.getLogger("vector_index")
 
+# Configurable refresh interval
+REFRESH_MIN_SECONDS = float(os.getenv("INDEX_REFRESH_MIN_SECONDS", "300"))
+
 try:
     import hnswlib
     HNSW_OK = True
@@ -111,7 +114,11 @@ class ClientIndex:
             self.index.init_index(max_elements=vecs.shape[0], ef_construction=EF_CONSTRUCT, M=M)
             labels = np.arange(vecs.shape[0])
             self.index.add_items(vecs, labels)
-            self.index.set_ef(64)
+            ef_query = min(128, max(32, int(len(clean) * 0.4)))
+            try:
+                self.index.set_ef(ef_query)
+            except Exception:
+                pass  # keep it safe if backend version lacks set_ef
             self.labels = labels.tolist()
             self.intent_ids = [e[0] for e in clean]
             self._next_label = vecs.shape[0]
@@ -167,6 +174,17 @@ class VectorIndexManager:
                 ci.rebuild(emb)
                 self._by_client[cid] = ci
         self._last_refresh_at = time.time()
+        
+        # Warm-start "retry once" if a client is empty
+        empty = [cid for cid, ci in self._by_client.items() if not ci._built or not ci.intent_ids]
+        if empty:
+            time.sleep(1.0)
+            for cid in empty:
+                try:
+                    self.refresh_client(cid)
+                except Exception as e:
+                    print(f"[HNSW] warm retry failed for {cid}: {e}")
+        
         print("[HNSW] warm(): done")
 
     def refresh_client(self, client_id: str):
@@ -202,8 +220,8 @@ class VectorIndexManager:
         current_time = time.time()
         last_check = getattr(self, '_last_version_check', {}).get(client_id, 0)
         
-        # Only check version every 5 minutes to avoid DB calls on every request
-        if current_time - last_check < 300:  # 5 minutes
+        # Only check version every N minutes to avoid DB calls on every request
+        if current_time - last_check < REFRESH_MIN_SECONDS:
             return False
             
         try:

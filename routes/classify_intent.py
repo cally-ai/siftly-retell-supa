@@ -849,7 +849,8 @@ def classify_intent():
     
     t1 = _now_ms()
     vector_mgr = get_vector_mgr()
-    vector_index_used = "hnsw" if vector_mgr is not None else "fallback"
+    from vector_index import HNSW_OK as _H
+    vector_index_used = "hnsw" if (vector_mgr is not None and _H) else "fallback"
     if vector_mgr is not None:
         t_ann_start = _now_ms()
         top = vector_mgr.topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
@@ -936,6 +937,7 @@ def classify_intent():
                     "ann_ms": ann_ms,
                     "llm_ms": 0,
                     "vector_index_used": vector_index_used,
+                    "early_exit": True,
                     "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
                 }
             }
@@ -991,6 +993,7 @@ def classify_intent():
                 "ann_ms": ann_ms,
                 "llm_ms": 0,
                 "vector_index_used": vector_index_used,
+                "early_exit": False,
                 "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
             }
         })
@@ -1146,14 +1149,15 @@ def classify_intent():
         "confidence": cls.get("confidence"),
         "needs_clarification": "yes" if needs else "no",  # Convert boolean to string "yes"/"no"
         "clarify_question": clarify_q if needs else "",
-        "telemetry": {
-            "embedding_top1_sim": (top[0]["similarity"] if top else None),
-            "embed_ms": embed_ms,
-            "ann_ms": ann_ms,
-            "llm_ms": llm_ms,
-            "vector_index_used": vector_index_used,
-            "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
-        }
+                    "telemetry": {
+                "embedding_top1_sim": (top[0]["similarity"] if top else None),
+                "embed_ms": embed_ms,
+                "ann_ms": ann_ms,
+                "llm_ms": llm_ms,
+                "vector_index_used": vector_index_used,
+                "early_exit": False,
+                "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
+            }
     }
 
     # If general (and not needing clarification): attach KB answer and set answer_from_kb action policy
@@ -1324,12 +1328,19 @@ def index_stats(client_id):
             return jsonify(payload)
         
         with ci._lock:
+            ef_val = 0
+            try:
+                ef_val = ci.index.get_ef() if ci.index else 0  # hnswlib supports get_ef()
+            except Exception:
+                ef_val = 64
             payload.update({
                 "built": ci._built, 
                 "size": len(ci.intent_ids),
-                "ef": 64,
+                "ef": ef_val,
                 "M": 32,
-                "last_refresh": vector_mgr._client_versions.get(client_id)
+                "last_refresh": vector_mgr._client_versions.get(client_id),
+                # optional: report engine
+                "engine": "hnsw" if getattr(__import__('vector_index'), 'HNSW_OK', False) else "rpc"
             })
             return jsonify(payload)
     except Exception as e:

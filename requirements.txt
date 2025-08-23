@@ -8,5 +8,5 @@ deepgram-sdk>=2.12.0
 pytz==2024.1
 twilio==8.10.0
 supabase>=2.5.1
-hnswlib==0.7.0
-numpy>=1.21
+hnswlib==0.8.0
+numpy>=1.26,<2.0
