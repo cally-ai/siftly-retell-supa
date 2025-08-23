@@ -7,6 +7,7 @@ from supabase import create_client, Client
 from openai import OpenAI
 from config import Config
 from utils.intents import get_general_question_intent_id
+from vector_index import VectorIndexManager
 
 # --- Blueprint dedicated to this feature ---
 classify_bp = Blueprint("classify_bp", __name__)
@@ -16,6 +17,16 @@ OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 CLASSIFY_MODEL = os.getenv("CLASSIFY_MODEL", "anthropic/claude-3.5-sonnet")
 TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "openai/gpt-4o-mini")
 TOP_K = int(os.getenv("TOP_K", "5"))
+
+# --- Vector Index Manager (singleton) ---
+_vector_mgr: Optional[VectorIndexManager] = None
+
+def get_vector_mgr() -> VectorIndexManager:
+    global _vector_mgr
+    if _vector_mgr is None:
+        _vector_mgr = VectorIndexManager(get_supabase_client())
+        _vector_mgr.warm()  # build all clients at boot
+    return _vector_mgr
 
 # --- KB Prefetch Configuration ---
 GENERAL_ACTION_POLICY = os.getenv("GENERAL_ACTION_POLICY", "answer_from_kb")
@@ -807,7 +818,7 @@ def classify_intent():
         return jsonify({"error": "No usable text to embed/classify"}), 400
         
     vec, embed_ms, emb_model = embed_english(query_en or ctx_en or "")
-    top = match_topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
+    top = get_vector_mgr().topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
     intent_ids = [t["intent_id"] for t in top]
     intents = load_intents(intent_ids)
     candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
@@ -1031,3 +1042,18 @@ def classify_intent():
             )
 
     return jsonify(result_obj)
+
+@classify_bp.route("/refresh-index", methods=["POST"])
+def refresh_index():
+    """Refresh the local vector index for a specific client"""
+    body = request.get_json(silent=True) or {}
+    client_id = body.get("client_id")
+    
+    if not client_id:
+        return jsonify({"error": "missing client_id"}), 400
+    
+    try:
+        get_vector_mgr().refresh_client(client_id)
+        return jsonify({"ok": True, "client_id": client_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
