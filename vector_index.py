@@ -190,13 +190,26 @@ class VectorIndexManager:
             pass
 
     def _needs_refresh(self, client_id: str) -> bool:
-        """Check if client index needs refresh based on version"""
+        """Check if client index needs refresh based on version - only check every 5 minutes"""
+        current_time = time.time()
+        last_check = getattr(self, '_last_version_check', {}).get(client_id, 0)
+        
+        # Only check version every 5 minutes to avoid DB calls on every request
+        if current_time - last_check < 300:  # 5 minutes
+            return False
+            
         try:
             row = self.sb.table("intent_embedding").select("updated_at").eq("client_id", client_id).order("updated_at", desc=True).limit(1).single().execute()
             if hasattr(row, "error") and row.error:
                 return True
             db_ts = row.data["updated_at"] if row.data else None
             cached = self._client_versions.get(client_id)
+            
+            # Update last check time
+            if not hasattr(self, '_last_version_check'):
+                self._last_version_check = {}
+            self._last_version_check[client_id] = current_time
+            
             return cached is None or (db_ts and db_ts > cached)
         except Exception:
             return True
