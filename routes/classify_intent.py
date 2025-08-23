@@ -1,5 +1,5 @@
 # routes/classify_intent.py
-import os, re, json, time, uuid as uuidlib
+import os, re, json, time, uuid as uuidlib, threading
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify
@@ -864,11 +864,16 @@ def classify_intent():
     
     # Validate query vector dimensions
     if len(vec) != 1536:
-        print(f"[ANN] bad query dims: {len(vec)}")
+        return jsonify({"error": "bad embedding dimensions", "got": len(vec)}), 400
     intent_ids = [t["intent_id"] for t in top]
     intents = load_intents(intent_ids)
-    candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
-                  for t in top for i in intents if i["id"] == t["intent_id"]]
+    intent_map = {i["id"]: i for i in intents}
+    candidates = [
+        {"id": t["intent_id"],
+         "name": intent_map.get(t["intent_id"], {}).get("name", ""),
+         "description": intent_map.get(t["intent_id"], {}).get("description", "")}
+        for t in top if t["intent_id"] in intent_map
+    ]
 
     # Get per-client General Question intent ID
     general_question_id = get_general_question_intent_id(get_supabase_client(), client_id)
@@ -899,7 +904,7 @@ def classify_intent():
                     "client_id": client_id,
                     "call_id": call_id,
                     "primary_intent_id": (best_row or {}).get("id"),
-                    "confidence": 0.95,  # High confidence for early exit
+                    "confidence": sim0,  # Use actual similarity for early exit
                     "embedding_top1_sim": sim0,  # Keep cosine similarity separate
                     "alternatives": [],
                     "clarifications_json": [],
@@ -922,7 +927,7 @@ def classify_intent():
                 "call_id": call_id,
                 "intent_id": best_id,
                 "intent_name": next((i["name"] for i in intents if i["id"] == best_id), "General Question" if is_general else None),
-                "confidence": 0.95,  # High confidence for early exit
+                "confidence": sim0,  # Use actual similarity for early exit
                 "needs_clarification": "no",
                 "clarify_question": "",
                 "telemetry": {
@@ -1215,13 +1220,14 @@ def classify_intent():
 
 # Simple rate limiting for refresh endpoint
 _refresh_attempts = {}  # client_id -> (count, reset_time)
+_rate_lock = threading.RLock()
 
 @classify_bp.route("/health/vector-index", methods=["GET"])
 def health_vector_index():
     """Health check for vector index dependencies"""
     try:
         import hnswlib
-        hnswlib_version = hnswlib.__version__
+        hnswlib_version = getattr(hnswlib, "__version__", "unknown")  # safer
         hnswlib_available = True
         hnswlib_error = None
     except ImportError as e:
@@ -1278,16 +1284,17 @@ def refresh_index():
     
     # Rate limiting: max 5 refreshes per client per minute
     current_time = time.time()
-    if client_id in _refresh_attempts:
-        count, reset_time = _refresh_attempts[client_id]
-        if current_time < reset_time:
-            if count >= 5:
-                return jsonify({"error": "rate limit exceeded"}), 429
-            _refresh_attempts[client_id] = (count + 1, reset_time)
+    with _rate_lock:
+        if client_id in _refresh_attempts:
+            count, reset_time = _refresh_attempts[client_id]
+            if current_time < reset_time:
+                if count >= 5:
+                    return jsonify({"error": "rate limit exceeded"}), 429
+                _refresh_attempts[client_id] = (count + 1, reset_time)
+            else:
+                _refresh_attempts[client_id] = (1, current_time + 60)
         else:
             _refresh_attempts[client_id] = (1, current_time + 60)
-    else:
-        _refresh_attempts[client_id] = (1, current_time + 60)
     
     try:
         get_vector_mgr().refresh_client(client_id)

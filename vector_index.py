@@ -1,20 +1,23 @@
 import os
 import json
+import logging
 import numpy as np
 import threading
 import time
 from typing import Dict, List, Tuple, Optional
 from supabase import Client as SupabaseClient
 
+log = logging.getLogger("vector_index")
+
 try:
     import hnswlib
     HNSW_OK = True
     # Some versions don't have __version__ attribute
     version = getattr(hnswlib, '__version__', 'unknown')
-    print(f"[HNSW] import successful: hnswlib version {version}")
+    log.info("[HNSW] import successful: hnswlib version %s", version)
 except Exception as e:
     HNSW_OK = False
-    print(f"[HNSW] import failed: {e}")
+    log.warning("[HNSW] import failed: %s", e)
     hnswlib = None
 
 def _coerce_vec_any(v, dim=1536):
@@ -92,9 +95,13 @@ class ClientIndex:
 
             # Validate and coerce vectors
             try:
-                clean = [(iid, _coerce_vec_any(vec, DIM)) for iid, vec in embeddings]
+                clean = []
+                for iid, vec in embeddings:
+                    a = np.asarray(_coerce_vec_any(vec, DIM), dtype=np.float32)
+                    n = np.linalg.norm(a) or 1.0
+                    clean.append((iid, (a / n).tolist()))
                 vecs = np.asarray([e[1] for e in clean], dtype=np.float32)
-                print(f"[HNSW] rebuild(): validated {len(clean)} vectors, shape: {vecs.shape}")
+                print(f"[HNSW] rebuild(): validated and normalized {len(clean)} vectors, shape: {vecs.shape}")
             except Exception as e:
                 print(f"[HNSW] rebuild(): vector validation failed: {e}")
                 self._built = False
@@ -129,6 +136,7 @@ class VectorIndexManager:
         self._by_client: Dict[str, ClientIndex] = {}
         self._last_refresh_at = 0
         self._client_versions: Dict[str, str] = {}  # client_id -> last_updated_at
+        self._last_version_check: Dict[str, float] = {}  # client_id -> last check time
 
     def warm(self):
         if not HNSW_OK:
@@ -210,6 +218,8 @@ class VectorIndexManager:
                 self._last_version_check = {}
             self._last_version_check[client_id] = current_time
             
+            if db_ts:
+                self._client_versions[client_id] = db_ts
             return cached is None or (db_ts and db_ts > cached)
         except Exception:
             return True
