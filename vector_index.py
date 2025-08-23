@@ -12,6 +12,7 @@ SPACE = "cosine"
 
 class ClientIndex:
     def __init__(self):
+        self._lock = threading.RLock()
         self.index = hnswlib.Index(space=SPACE, dim=DIM)
         self.index.init_index(max_elements=1, ef_construction=EF_CONSTRUCT, M=M)  # init small; we'll resize
         self.index.set_ef(64)  # query time/accuracy
@@ -21,33 +22,35 @@ class ClientIndex:
         self._built = False
 
     def rebuild(self, embeddings: List[Tuple[str, List[float]]]):
-        # embeddings: [(intent_id, vector), ...]
-        if not embeddings:
-            # empty index but keep object
-            self.index = hnswlib.Index(space=SPACE, dim=DIM)
-            self.index.init_index(max_elements=1, ef_construction=EF_CONSTRUCT, M=M)
-            self.labels, self.intent_ids = [], []
-            self._next_label, self._built = 0, True
-            return
+        with self._lock:
+            # embeddings: [(intent_id, vector), ...]
+            if not embeddings:
+                # empty index but keep object
+                self.index = hnswlib.Index(space=SPACE, dim=DIM)
+                self.index.init_index(max_elements=1, ef_construction=EF_CONSTRUCT, M=M)
+                self.labels, self.intent_ids = [], []
+                self._next_label, self._built = 0, True
+                return
 
-        vecs = np.asarray([e[1] for e in embeddings], dtype=np.float32)
-        self.index = hnswlib.Index(space=SPACE, dim=DIM)
-        self.index.init_index(max_elements=vecs.shape[0], ef_construction=EF_CONSTRUCT, M=M)
-        labels = np.arange(vecs.shape[0])
-        self.index.add_items(vecs, labels)
-        self.index.set_ef(64)
-        self.labels = labels.tolist()
-        self.intent_ids = [e[0] for e in embeddings]
-        self._next_label = vecs.shape[0]
-        self._built = True
+            vecs = np.asarray([e[1] for e in embeddings], dtype=np.float32)
+            self.index = hnswlib.Index(space=SPACE, dim=DIM)
+            self.index.init_index(max_elements=vecs.shape[0], ef_construction=EF_CONSTRUCT, M=M)
+            labels = np.arange(vecs.shape[0])
+            self.index.add_items(vecs, labels)
+            self.index.set_ef(64)
+            self.labels = labels.tolist()
+            self.intent_ids = [e[0] for e in embeddings]
+            self._next_label = vecs.shape[0]
+            self._built = True
 
     def topk(self, vec: List[float], k: int) -> List[Tuple[str, float]]:
-        if not self._built or not self.intent_ids:
-            return []
-        q = np.asarray([vec], dtype=np.float32)
-        labels, dists = self.index.knn_query(q, k=min(k, len(self.intent_ids)))
-        # hnswlib returns cosine distance (0 = identical). Convert to similarity = 1 - dist
-        return [(self.intent_ids[l], float(1.0 - d)) for l, d in zip(labels[0], dists[0])]
+        with self._lock:
+            if not self._built or not self.intent_ids:
+                return []
+            q = np.asarray([vec], dtype=np.float32)
+            labels, dists = self.index.knn_query(q, k=min(k, len(self.intent_ids)))
+            # hnswlib returns cosine distance (0 = identical). Convert to similarity = 1 - dist
+            return [(self.intent_ids[l], float(1.0 - d)) for l, d in zip(labels[0], dists[0])]
 
 class VectorIndexManager:
     def __init__(self, supabase: SupabaseClient):

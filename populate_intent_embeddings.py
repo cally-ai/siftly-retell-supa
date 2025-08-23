@@ -6,6 +6,9 @@ Run this once to set up the local vector index.
 
 import os
 import sys
+import math
+import random
+import time
 from dotenv import load_dotenv
 from openai import OpenAI
 from supabase import create_client
@@ -25,9 +28,10 @@ if not all([OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY]):
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-def vec_literal(arr):
-    """Convert Python list to pgvector literal"""
-    return "[" + ",".join(str(x) for x in arr) + "]"
+def l2_normalize(v):
+    """L2-normalize a vector"""
+    n = math.sqrt(sum(x*x for x in v)) or 1.0
+    return [x / n for x in v]
 
 def get_intent_text(intent):
     """Generate text for embedding from intent data"""
@@ -91,11 +95,15 @@ def main():
             )
             embedding = embedding_response.data[0].embedding
             
+            # Normalize embedding
+            embedding = l2_normalize(embedding)
+            
             # Insert into database
             supabase.table("intent_embedding").upsert({
                 "client_id": intent["client_id"],
                 "intent_id": intent["id"],
-                "embedding": vec_literal(embedding)
+                "embedding": embedding,  # Pass list directly
+                "updated_at": "now()"
             }).execute()
             
             success_count += 1

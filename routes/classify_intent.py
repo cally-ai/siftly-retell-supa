@@ -818,6 +818,15 @@ def classify_intent():
         return jsonify({"error": "No usable text to embed/classify"}), 400
         
     vec, embed_ms, emb_model = embed_english(query_en or ctx_en or "")
+    
+    # L2-normalize query vector to match index expectations
+    import numpy as np
+    def _l2(v): 
+        a = np.asarray(v, dtype=np.float32)
+        n = np.linalg.norm(a) or 1.0
+        return (a / n).tolist()
+    
+    vec = _l2(vec)
     top = get_vector_mgr().topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
     intent_ids = [t["intent_id"] for t in top]
     intents = load_intents(intent_ids)
@@ -826,6 +835,72 @@ def classify_intent():
 
     # Get per-client General Question intent ID
     general_question_id = get_general_question_intent_id(get_supabase_client(), client_id)
+    
+    # Early-exit thresholds (skip LLM for obvious matches)
+    EARLY_SIM_THRESH = 0.92
+    EARLY_MARGIN = 0.08
+    
+    if top:
+        sim0 = top[0]["similarity"]
+        sim1 = top[1]["similarity"] if len(top) > 1 else -1.0
+        if (sim0 >= EARLY_SIM_THRESH) or (sim0 - sim1 >= EARLY_MARGIN):
+            best_id = top[0]["intent_id"]
+            best_row = next((i for i in intents if i["id"] == best_id), None)
+            is_general = (best_id == general_question_id)
+            needs = False
+            routing = None
+            if not is_general:
+                category = load_category(best_row.get("category_id") if best_row else None)
+                routing = effective_policy(best_row or {}, category)
+
+            call_id = _resolve_call_id(provided_call_id, retell_event_id)
+
+            # Log early-exit
+            try:
+                get_supabase_client().table("call_reason_log").insert({
+                    "client_id": client_id,
+                    "call_id": call_id,
+                    "primary_intent_id": (best_row or {}).get("id"),
+                    "confidence": sim0,  # cosine similarity
+                    "embedding_top1_sim": sim0,
+                    "alternatives": [],
+                    "clarifications_json": [],
+                    "llm_model": "skipped-early-exit",
+                    "embedding_model": emb_model,
+                    "llm_latency_ms": 0,
+                    "embed_latency_ms": embed_ms,
+                    "router_version": "v1",
+                    "utterance": _redact_pii(context_text),
+                    "detected_lang": (caller_language.lower() or None),
+                    "utterance_en": _redact_pii(ctx_en),
+                    "explanation": "Early-exit based on vector similarity",
+                    "unmatched_intent": False
+                }).execute()
+                print(f"Successfully logged early-exit for call_id: {call_id}")
+            except Exception as e:
+                print(f"Failed to log early-exit: {e}")
+
+            result_obj = {
+                "call_id": call_id,
+                "intent_id": best_id,
+                "intent_name": next((i["name"] for i in intents if i["id"] == best_id), "General Question" if is_general else None),
+                "confidence": sim0,
+                "needs_clarification": "no",
+                "clarify_question": "",
+                "telemetry": {
+                    "embedding_top1_sim": sim0,
+                    "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
+                }
+            }
+
+            if routing and (not is_general):
+                result_obj.update({
+                    "action_policy": routing.get("action_policy"),
+                    "transfer_number": routing.get("transfer_number"),
+                    "category_name": routing.get("category_name")
+                })
+
+            return jsonify(result_obj)
     
     # ensure General Question is a candidate, even if vector shortlist didn't return it
     if general_question_id and not any(c["id"] == general_question_id for c in candidates):
@@ -923,6 +998,7 @@ def classify_intent():
             if curated: clarify_q = curated
 
     # 5) Effective routing
+    best_row = None  # ensure defined before any use
     best_id = cls.get("best_intent_id") or (candidates[0]["id"] if candidates else None)
     
     is_general = (best_id == general_question_id)
@@ -1048,7 +1124,10 @@ def refresh_index():
     """Refresh the local vector index for a specific client"""
     body = request.get_json(silent=True) or {}
     client_id = body.get("client_id")
-    
+    token = request.headers.get("X-Index-Admin-Token")
+
+    if token != os.getenv("INDEX_ADMIN_TOKEN"):
+        return jsonify({"error": "unauthorized"}), 401
     if not client_id:
         return jsonify({"error": "missing client_id"}), 400
     
@@ -1057,3 +1136,12 @@ def refresh_index():
         return jsonify({"ok": True, "client_id": client_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@classify_bp.route("/index-stats/<client_id>", methods=["GET"])
+def index_stats(client_id):
+    """Get stats about the local vector index for a client"""
+    ci = get_vector_mgr()._by_client.get(client_id)
+    if not ci:
+        return jsonify({"built": False, "size": 0})
+    with ci._lock:
+        return jsonify({"built": ci._built, "size": len(ci.intent_ids)})
