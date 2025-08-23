@@ -9,7 +9,9 @@ from supabase import Client as SupabaseClient
 try:
     import hnswlib
     HNSW_OK = True
-    print(f"[HNSW] import successful: hnswlib version {hnswlib.__version__}")
+    # Some versions don't have __version__ attribute
+    version = getattr(hnswlib, '__version__', 'unknown')
+    print(f"[HNSW] import successful: hnswlib version {version}")
 except Exception as e:
     HNSW_OK = False
     print(f"[HNSW] import failed: {e}")
