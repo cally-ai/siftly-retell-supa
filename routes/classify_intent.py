@@ -855,7 +855,7 @@ def classify_intent():
         t_ann_start = _now_ms()
         top = vector_mgr.topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
         ann_ms = _now_ms() - t_ann_start
-        print(f"[ANN] used=hnsw topk_len={len(top)} ann_ms={ann_ms}")
+        print(f"[ANN] used={vector_index_used} topk_len={len(top)} ann_ms={ann_ms}")
     else:
         # Fallback to original match_topk if vector index manager failed
         t_ann_start = _now_ms()
@@ -1319,12 +1319,12 @@ def index_stats(client_id):
         
         ci = vector_mgr._by_client.get(client_id)
         payload = {
-            "hnsw_ok": getattr(__import__('vector_index'), 'HNSW_OK', True),
+            "hnsw_ok": getattr(__import__('vector_index'), 'HNSW_OK', False),
             "last_refresh_at": getattr(vector_mgr, "_last_refresh_at", 0)
         }
         
         if not ci:
-            payload.update({"built": False, "size": 0, "ef": 64, "M": 32})
+            payload.update({"built": False, "size": 0, "ef": 0, "M": 32})
             return jsonify(payload)
         
         with ci._lock:
