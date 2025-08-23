@@ -881,13 +881,14 @@ def classify_intent():
     
     # Early-exit thresholds (skip LLM for obvious matches)
     EARLY_SIM_THRESH = 0.92
-    EARLY_MARGIN = 0.08
+    EARLY_MARGIN = 0.15  # Increased from 0.08 to be more conservative
     LOW_SIM_FLOOR = float(os.getenv("LOW_SIM_FLOOR", "0.55"))  # Skip LLM if all similarities below this
     
     if top:
         sim0 = top[0]["similarity"]
         sim1 = top[1]["similarity"] if len(top) > 1 else -1.0
-        if (sim0 >= EARLY_SIM_THRESH) or (sim0 - sim1 >= EARLY_MARGIN):
+        # Only early-exit if we have high confidence OR a very clear winner
+        if (sim0 >= EARLY_SIM_THRESH) or (sim0 >= 0.75 and sim0 - sim1 >= EARLY_MARGIN):
             best_id = top[0]["intent_id"]
             best_row = next((i for i in intents if i["id"] == best_id), None)
             is_general = (best_id == general_question_id)
