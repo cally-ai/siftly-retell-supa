@@ -245,6 +245,12 @@ class VectorIndexManager:
                 return []
         
         pairs = ci.topk(vec, k)
+        if not pairs:
+            log.warning("[HNSW] WARN: empty ANN result, forcing refresh for %s", client_id)
+            self.refresh_client(client_id)
+            with self._lock:
+                ci = self._by_client.get(client_id)
+            pairs = ci.topk(vec, k) if ci else []
         return [{"intent_id": iid, "similarity": sim} for iid, sim in pairs]
 
     # --- Supabase fetch helpers ---

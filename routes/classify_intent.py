@@ -881,7 +881,7 @@ def classify_intent():
     # Early-exit thresholds (skip LLM for obvious matches)
     EARLY_SIM_THRESH = 0.92
     EARLY_MARGIN = 0.08
-    LOW_SIM_FLOOR = 0.55  # Skip LLM if all similarities below this
+    LOW_SIM_FLOOR = float(os.getenv("LOW_SIM_FLOOR", "0.55"))  # Skip LLM if all similarities below this
     
     if top:
         sim0 = top[0]["similarity"]
@@ -1080,7 +1080,10 @@ def classify_intent():
     except Exception as e:
         print(f"OpenAI classification failed: {e}")
         print("Falling back to OpenRouter...")
+        # measure the fallback too
+        llm_start = _now_ms()
         cls = classify_with_openrouter(ctx_en or query_en or "", candidates, target_lang, cta_yes)
+        llm_ms = _now_ms() - llm_start
         print("OpenRouter classification completed")
 
     # Clarifier override (if curated)
