@@ -28,8 +28,14 @@ _vector_mgr: Optional[VectorIndexManager] = None
 def get_vector_mgr() -> VectorIndexManager:
     global _vector_mgr
     if _vector_mgr is None:
-        _vector_mgr = VectorIndexManager(get_supabase_client())
-        _vector_mgr.warm()  # build all clients at boot
+        try:
+            _vector_mgr = VectorIndexManager(get_supabase_client())
+            _vector_mgr.warm()  # build all clients at boot
+            print("Vector index manager initialized successfully")
+        except Exception as e:
+            print(f"Warning: Vector index manager initialization failed: {e}")
+            # Create a fallback manager that will use the original match_topk
+            _vector_mgr = None
     return _vector_mgr
 
 # --- KB Prefetch Configuration ---
@@ -834,7 +840,12 @@ def classify_intent():
     vec = _l2(vec)
     
     t1 = _now_ms()
-    top = get_vector_mgr().topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
+    vector_mgr = get_vector_mgr()
+    if vector_mgr is not None:
+        top = vector_mgr.topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
+    else:
+        # Fallback to original match_topk if vector index manager failed
+        top = match_topk(client_id, vec, TOP_K)
     ann_ms = _now_ms() - t1  # ANN (HNSW) latency
     intent_ids = [t["intent_id"] for t in top]
     intents = load_intents(intent_ids)
