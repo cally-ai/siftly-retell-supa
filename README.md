@@ -5,6 +5,11 @@ A Python Flask application that handles Retell AI webhooks, IVR flows, and store
 ## Features
 
 - **Retell AI webhook handlers**: Endpoints for Retell AI integrations
+- **Intent Classification**: AI-powered intent classification with OpenAI/OpenRouter
+- **Knowledge Base Q&A**: Dynamic FAQ answering for general questions
+- **Vector Search**: Semantic search using OpenAI embeddings
+- **Contact Collection**: Dynamic Typeform integration for contact collection
+- **Business Hours**: Intelligent business hours checking and routing
 - **Supabase-backed storage**: Reads/writes operational data to Supabase
 - **Modular Architecture**: Clean separation of concerns with services, routes, and utilities
 - **Deployment Ready**: Configured for easy deployment on Render
@@ -36,6 +41,9 @@ A Python Flask application that handles Retell AI webhooks, IVR flows, and store
    Edit `.env` with your actual values:
    - `SUPABASE_URL`: Your Supabase project URL
    - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key
+   - `OPENAI_API_KEY`: Your OpenAI API key for embeddings and LLM
+   - `OPENROUTER_API_KEY`: Your OpenRouter API key (fallback for LLM)
+   - `TYPEFORM_ACCESS_TOKEN`: Your Typeform access token for contact collection
 
 4. **Run the application**
    ```bash
@@ -58,6 +66,9 @@ Provide `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in your environment. Ensu
 4. Add your environment variables in the Render dashboard:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - `OPENAI_API_KEY`
+   - `OPENROUTER_API_KEY` (optional)
+   - `TYPEFORM_ACCESS_TOKEN` (optional)
 
 ### Option 2: Manual Setup
 
@@ -88,6 +99,34 @@ Get detailed system status and configuration information.
 GET /ping
 ```
 Simple ping endpoint for load balancers.
+
+### Intent Classification
+```
+POST /classify-intent
+```
+AI-powered intent classification using OpenAI/OpenRouter. Returns intent classification with confidence scores and routing information.
+
+### Typeform Integration
+```
+POST /typeform/create-typeform
+```
+Creates dynamic Typeform for contact collection based on client configuration.
+
+```
+POST /typeform/webhook
+```
+Handles Typeform submission webhooks and stores contact data.
+
+### Webhook Handlers
+```
+POST /webhook/inbound
+```
+Handles Retell AI inbound webhook events.
+
+```
+POST /webhook/started
+```
+Handles Retell AI call started events.
 
 ## Customization
 
@@ -144,6 +183,9 @@ app.register_blueprint(new_bp)
 |----------|-------------|----------|
 | `SUPABASE_URL` | Supabase project URL | Yes |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Yes |
+| `OPENAI_API_KEY` | OpenAI API key for embeddings and LLM | Yes |
+| `OPENROUTER_API_KEY` | OpenRouter API key (fallback for LLM) | No |
+| `TYPEFORM_ACCESS_TOKEN` | Typeform access token for contact collection | No |
 | `FLASK_ENV` | Flask environment | No (defaults to production) |
 | `FLASK_DEBUG` | Enable debug mode | No (defaults to False) |
 | `LOG_LEVEL` | Logging level | No (defaults to INFO) |
@@ -178,6 +220,48 @@ The application logs webhook and IVR operations. Check the logs in your Render d
 3. Make your changes
 4. Test thoroughly
 5. Submit a pull request
+
+## Intent Classification System
+
+### Overview
+
+The system uses AI-powered intent classification to route calls to the appropriate handling. It combines:
+
+- **Vector Search**: Semantic similarity using OpenAI embeddings
+- **LLM Classification**: OpenAI GPT-4o-mini (primary) with OpenRouter fallback
+- **Knowledge Base Integration**: Direct FAQ answering for general questions
+- **Dynamic Routing**: Context-aware routing based on intent confidence
+
+### Performance Optimizations
+
+- **TOP_K=5**: Reduced from 7 for faster vector search
+- **Parallel Processing**: KB prefetch runs alongside LLM classification
+- **Caching**: Intent lookups are cached for performance
+- **Fallback Strategy**: OpenRouter as backup when OpenAI fails
+
+### Response Format
+
+```json
+{
+  "call_id": "call_123",
+  "intent_id": "uuid",
+  "intent_name": "Human Readable Name",
+  "confidence": 0.9,
+  "needs_clarification": "no",
+  "clarify_question": "",
+  "action_policy": "route_to_agent",
+  "category_name": "sales_queue",
+  "transfer_number": "+1234567890",
+  "acknowledgment_text": "I understand your concern...",
+  "telemetry": {
+    "embedding_top1_sim": 0.614,
+    "topK": [
+      {"rank": 1, "intent_name": "Heat Pump Not Heating/Cooling", "sim": 0.614},
+      {"rank": 2, "intent_name": "Warranty Claim", "sim": 0.525}
+    ]
+  }
+}
+```
 
 ## KB Q&A Runbook (Ops)
 
