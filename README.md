@@ -128,6 +128,17 @@ POST /webhook/started
 ```
 Handles Retell AI call started events.
 
+### Voice Webhook (Direct Twilio Integration)
+```
+POST /voice-webhook
+```
+Direct Twilio webhook that:
+- Looks up Retell agent via Supabase chain
+- Registers call with Retell AI
+- Starts Twilio Media Streams (stereo)
+- Dials Retell via SIP
+- Returns TwiML response
+
 ## Customization
 
 ### Modifying Schema
@@ -186,6 +197,8 @@ app.register_blueprint(new_bp)
 | `OPENAI_API_KEY` | OpenAI API key for embeddings and LLM | Yes |
 | `OPENROUTER_API_KEY` | OpenRouter API key (fallback for LLM) | No |
 | `TYPEFORM_ACCESS_TOKEN` | Typeform access token for contact collection | No |
+| `RETELL_API_KEY` | Retell AI API key for voice webhook | No |
+| `PUBLIC_HOSTNAME` | Public hostname for Media Streams WebSocket | No |
 | `FLASK_ENV` | Flask environment | No (defaults to production) |
 | `FLASK_DEBUG` | Enable debug mode | No (defaults to False) |
 | `LOG_LEVEL` | Logging level | No (defaults to INFO) |

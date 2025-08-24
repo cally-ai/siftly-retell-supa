@@ -36,6 +36,9 @@ class Config:
     RETELL_WEBHOOK_SECRET = os.getenv('RETELL_WEBHOOK_SECRET')
     RETELL_API_KEY = os.getenv('RETELL_API_KEY')
     
+    # Voice Webhook Configuration
+    PUBLIC_HOSTNAME = os.getenv('PUBLIC_HOSTNAME')
+    
     # Twilio Configuration
     TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
     TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')

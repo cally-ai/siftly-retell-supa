@@ -9,6 +9,7 @@ from config import Config, config
 from routes.health_routes import health_bp
 from routes.webhook_routes import webhook_bp
 from routes.typeform import typeform_bp
+from routes.voice_webhook import voice_bp
 
 # TODO: Implement these routes
 # from routes.vapi_routes import vapi_bp
@@ -58,6 +59,7 @@ def create_app(config_name=None):
     app.register_blueprint(health_bp)
     app.register_blueprint(webhook_bp)
     app.register_blueprint(typeform_bp)
+    app.register_blueprint(voice_bp)  # Exposes /voice-webhook
 
     # TODO: Register these when implemented
     # app.register_blueprint(vapi_bp)
