@@ -231,7 +231,6 @@ def _extract_embedding_query(conversation: str) -> str:
         return last_user_text
 
     # Ack: try to prepend the prior agent line to give meaning
-    # (e.g., "Agent: Do you want to reschedule?" + "User: Yes")
     prev_agent_text = None
     for j in range(last_user_idx - 1, -1, -1):
         if parsed[j][0] == "agent":
@@ -532,9 +531,9 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
         "name": "intent_classification",
         "strict": True,
         "schema": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
                 "intent": {"type": "string"},
                 "intent_name": {"type": "string"},
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
@@ -581,15 +580,15 @@ REQUIRED JSON SCHEMA:
     
     try:
         resp = get_or_client().chat.completions.create(
-        model=CLASSIFY_MODEL,
-        messages=[
+            model=CLASSIFY_MODEL,
+            messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message}
-        ],
-        response_format={"type": "json_schema", "json_schema": schema}
-    )
-    latency_ms = int((time.time() - t0) * 1000)
-    content = (resp.choices[0].message.content or "{}").strip()
+            ],
+            response_format={"type": "json_schema", "json_schema": schema}
+        )
+        latency_ms = int((time.time() - t0) * 1000)
+        content = (resp.choices[0].message.content or "{}").strip()
         
         # Debug logging
         print(f"OpenRouter response content: '{content}'")
@@ -600,7 +599,7 @@ REQUIRED JSON SCHEMA:
         
         # Try to parse the JSON response
         try:
-    parsed = json.loads(content)
+            parsed = json.loads(content)
         except json.JSONDecodeError:
             # If that fails, try to find the JSON object in the response
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
@@ -696,7 +695,7 @@ DG_LANG_MAP = {
     # english
     "en": "en", "en-us": "en", "en-gb": "en", "en-au": "en",
     # dutch
-    "nl": "nl", "nl-be": "nl",  # <-- explicit support for nl-BE
+    "nl": "nl", "nl-be": "nl",
     # common EU langs
     "fr": "fr", "fr-be": "fr", "de": "de", "es": "es", "it": "it",
     # nordics
@@ -781,37 +780,37 @@ def classify_intent():
 
     # 2) Decide language based on whichever string is available (prefer embed_query)
     sample_for_lang = (embed_query or context_text or "")
-        if caller_language:
-            c_low = caller_language.lower()
-            is_english = (c_low == "en") or c_low.startswith("en-")
-        else:
+    if caller_language:
+        c_low = caller_language.lower()
+        is_english = (c_low == "en") or c_low.startswith("en-")
+    else:
         detected_lang = _detect_language_simple(sample_for_lang)
-            caller_language = detected_lang
-            is_english = detected_lang == "en"
+        caller_language = detected_lang
+        is_english = detected_lang == "en"
 
     # Translate ONLY when not English
-        if is_english:
+    if is_english:
         ctx_en   = context_text
         query_en = embed_query
         _translate_ms = 0
-        else:
+    else:
         ctx_en, t1 = translate_to_english(context_text)
         query_en, t2 = translate_to_english(embed_query)
         _translate_ms = max(t1, t2)  # keep one latency figure if you log it
 
-        # Language for clarifying question
-        target_lang = normalize_target_language(caller_language)
+    # Language for clarifying question
+    target_lang = normalize_target_language(caller_language)
 
     # 3) Embed + shortlist (use sharp query text)
     if not (query_en or ctx_en):
         return jsonify({"error": "No usable text to embed/classify"}), 400
         
     vec, embed_ms, emb_model = embed_english(query_en or ctx_en or "")
-        top = match_topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
-        intent_ids = [t["intent_id"] for t in top]
-        intents = load_intents(intent_ids)
-        candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
-                      for t in top for i in intents if i["id"] == t["intent_id"]]
+    top = match_topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
+    intent_ids = [t["intent_id"] for t in top]
+    intents = load_intents(intent_ids)
+    candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
+                  for t in top for i in intents if i["id"] == t["intent_id"]]
 
     # Get per-client General Question intent ID
     general_question_id = get_general_question_intent_id(get_supabase_client(), client_id)
@@ -902,70 +901,70 @@ def classify_intent():
         cls = classify_with_openrouter(ctx_en or query_en or "", candidates, target_lang, cta_yes)
         print("OpenRouter classification completed")
 
-        # Clarifier override (if curated)
-        clarify_q = cls.get("clarify_question") or ""
-        if cls.get("needs_clarification") and len(candidates) >= 2:
-            a = cls.get("best_intent_id") or candidates[0]["id"]
-            b = next((c["id"] for c in candidates if c["id"] != a), None)
-            if b:
-                curated = get_curated_clarifier(a, b)
-                if curated: clarify_q = curated
+    # Clarifier override (if curated)
+    clarify_q = cls.get("clarify_question") or ""
+    if cls.get("needs_clarification") and len(candidates) >= 2:
+        a = cls.get("best_intent_id") or candidates[0]["id"]
+        b = next((c["id"] for c in candidates if c["id"] != a), None)
+        if b:
+            curated = get_curated_clarifier(a, b)
+            if curated:
+                clarify_q = curated
 
-        # 5) Effective routing
-        best_id = cls.get("best_intent_id") or (candidates[0]["id"] if candidates else None)
-    
+    # 5) Effective routing
+    best_id = cls.get("best_intent_id") or (candidates[0]["id"] if candidates else None)
     is_general = (best_id == general_question_id)
     needs = bool(cls.get("needs_clarification"))
 
-    # Only compute transactional routing when NOT general and NOT needing clarification
     routing = None
+    best_row = None
     if (not needs) and (not is_general):
         best_row = next((i for i in intents if i["id"] == best_id), intents[0] if intents else None)
         category = load_category(best_row.get("category_id") if best_row else None)
         routing = effective_policy(best_row or {}, category)
 
-        # 6) Log (rich but safe)
+    # 6) Log (rich but safe)
     call_id = _resolve_call_id(provided_call_id, retell_event_id)
-        try:
+    try:
         get_supabase_client().table("call_reason_log").insert({
-                "client_id": client_id,
-                "call_id": call_id,
-                "primary_intent_id": (best_row or {}).get("id"),
-                "confidence": cls.get("confidence"),
-                "embedding_top1_sim": (top[0]["similarity"] if top else None),
-                "alternatives": (cls.get("alternatives") or [])[:3],
-                "clarifications_json": [{"asked": bool(clarify_q)}] if cls.get("needs_clarification") else [],
-                "llm_model": cls.get("model"),
-                "embedding_model": emb_model,
-                "llm_latency_ms": cls.get("latency_ms"),
-                "embed_latency_ms": embed_ms,
-                "openrouter_request_id": cls.get("request_id"),
-                "prompt_tokens": cls.get("prompt_tokens"),
-                "completion_tokens": cls.get("completion_tokens"),
-                "router_version": "v1",
+            "client_id": client_id,
+            "call_id": call_id,
+            "primary_intent_id": (best_row or {}).get("id"),
+            "confidence": cls.get("confidence"),
+            "embedding_top1_sim": (top[0]["similarity"] if top else None),
+            "alternatives": (cls.get("alternatives") or [])[:3],
+            "clarifications_json": [{"asked": bool(clarify_q)}] if cls.get("needs_clarification") else [],
+            "llm_model": cls.get("model"),
+            "embedding_model": emb_model,
+            "llm_latency_ms": cls.get("latency_ms"),
+            "embed_latency_ms": embed_ms,
+            "openrouter_request_id": cls.get("request_id"),
+            "prompt_tokens": cls.get("prompt_tokens"),
+            "completion_tokens": cls.get("completion_tokens"),
+            "router_version": "v1",
             "utterance": _redact_pii(context_text),
-                "detected_lang": (caller_language.lower() or None),
+            "detected_lang": (caller_language.lower() or None),
             "utterance_en": _redact_pii(ctx_en),
-            "explanation": cls.get("explanation", ""),  # Add the AI explanation
-            "unmatched_intent": not bool(candidates)  # Flag for unmatched intents
-            }).execute()
+            "explanation": cls.get("explanation", ""),
+            "unmatched_intent": not bool(candidates)
+        }).execute()
         print(f"Successfully logged call_reason_log for call_id: {call_id}")
     except Exception as e:
         print(f"Failed to log call_reason_log for call_id {call_id}: {e}")
 
-        # 7) Build result (must be STRING)
-        result_obj = {
-            "call_id": call_id,
+    # 7) Build result (must be STRING)
+    result_obj = {
+        "call_id": call_id,
         "intent_id": best_id,
         "intent_name": next((i["name"] for i in intents if i["id"] == best_id), "General Question" if is_general else None),
-            "confidence": cls.get("confidence"),
-        "needs_clarification": "yes" if needs else "no",  # Convert boolean to string "yes"/"no"
+        "confidence": cls.get("confidence"),
+        "needs_clarification": "yes" if needs else "no",
         "clarify_question": clarify_q if needs else "",
-            "telemetry": {
-                "embedding_top1_sim": (top[0]["similarity"] if top else None),
-                "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
-            }
+        "telemetry": {
+            "embedding_top1_sim": (top[0]["similarity"] if top else None),
+            "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
         }
+    }
 
     # If general (and not needing clarification): attach KB answer and set answer_from_kb action policy
     if (not needs) and is_general:
@@ -975,9 +974,7 @@ def classify_intent():
             kb_rows = []
         top_kb = kb_rows[0] if kb_rows else None
         
-        # Check if KB has a good match
         if top_kb and (top_kb.get("score") or 0) >= KB_SCORE_THRESH:
-            # Flat KB fields
             result_obj.update({
                 "action_policy": GENERAL_ACTION_POLICY,
                 "category_name": GENERAL_CATEGORY_NAME,
@@ -987,15 +984,12 @@ def classify_intent():
                 "kb_score": top_kb.get("score"),
                 "kb_source_metadata": top_kb.get("metadata", {})
             })
-            # Generate the bridge + CTA with OpenRouter (kept flat)
             result_obj["cta_text"] = generate_cta_bridge(
                 top_kb.get("title") or "",
                 top_kb.get("content") or "",
                 target_lang
             )
         else:
-            # Low KB score but LLM said no clarification needed - provide KB answer anyway
-            # (LLM confidence takes precedence over KB score)
             result_obj.update({
                 "action_policy": GENERAL_ACTION_POLICY,
                 "category_name": GENERAL_CATEGORY_NAME,
@@ -1005,7 +999,6 @@ def classify_intent():
                 "kb_score": top_kb.get("score") if top_kb else 0.0,
                 "kb_source_metadata": top_kb.get("metadata", {}) if top_kb else {}
             })
-            # Generate the bridge + CTA with OpenRouter (kept flat)
             result_obj["cta_text"] = generate_cta_bridge(
                 top_kb.get("title") or "General Information",
                 top_kb.get("content") or "I can help you with that. Let me connect you with someone who can provide more specific information.",
@@ -1021,10 +1014,9 @@ def classify_intent():
             "category_name": routing.get("category_name")
         })
         
-        # Generate empathetic acknowledgment for transactional intents
         if action_policy in ["route_to_agent", "collect_contact", "ask_urgency_then_collect"]:
             result_obj["acknowledgment_text"] = generate_acknowledgment(
-                ctx_en or query_en or "",  # Use the English utterance
+                ctx_en or query_en or "",
                 result_obj.get("intent_name", ""),
                 action_policy,
                 target_lang
