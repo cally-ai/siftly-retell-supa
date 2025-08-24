@@ -1,5 +1,5 @@
 # routes/classify_intent.py
-import os, re, json, time, uuid as uuidlib, threading
+import os, re, json, time, uuid as uuidlib
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify
@@ -7,17 +7,6 @@ from supabase import create_client, Client
 from openai import OpenAI
 from config import Config
 from utils.intents import get_general_question_intent_id
-try:
-    from vector_index import VectorIndexManager
-    VECTOR_INDEX_AVAILABLE = True
-except ImportError as e:
-    print(f"Warning: vector_index module not available: {e}")
-    VECTOR_INDEX_AVAILABLE = False
-    VectorIndexManager = None
-
-def _now_ms():
-    """Get current time in milliseconds"""
-    return int(time.time() * 1000)
 
 # --- Blueprint dedicated to this feature ---
 classify_bp = Blueprint("classify_bp", __name__)
@@ -27,24 +16,6 @@ OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 CLASSIFY_MODEL = os.getenv("CLASSIFY_MODEL", "anthropic/claude-3.5-sonnet")
 TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "openai/gpt-4o-mini")
 TOP_K = int(os.getenv("TOP_K", "5"))
-
-# --- Vector Index Manager (singleton) ---
-_vector_mgr: Optional[VectorIndexManager] = None
-
-def get_vector_mgr() -> VectorIndexManager:
-    global _vector_mgr
-    if not VECTOR_INDEX_AVAILABLE:
-        return None
-    if _vector_mgr is None:
-        try:
-            _vector_mgr = VectorIndexManager(get_supabase_client())
-            _vector_mgr.warm()  # build all clients at boot
-            print("Vector index manager initialized successfully")
-        except Exception as e:
-            print(f"Warning: Vector index manager initialization failed: {e}")
-            # Create a fallback manager that will use the original match_topk
-            _vector_mgr = None
-    return _vector_mgr
 
 # --- KB Prefetch Configuration ---
 GENERAL_ACTION_POLICY = os.getenv("GENERAL_ACTION_POLICY", "answer_from_kb")
@@ -91,11 +62,6 @@ ACK_REGEX = re.compile(
 CTA_RE   = re.compile(r'\b(quote|estimate|site (?:survey|assessment)|appointment|book|schedule)\b', re.I)
 NEG_RE   = re.compile(r'^(?:no|nope|nah|not now|maybe later)\W*$', re.I)
 SALES_INTENT_RE = re.compile(r'\b(quote|estimate|book|schedule|appointment|assessment|demo|consult|sales)\b', re.I)
-VAGUE_RE = re.compile(
-    r"\b(i\s*(have|got)?\s*(a|one)?\s*(question|issue|problem)|"
-    r"(need|needing)\s*help|can you help|have a quick question|"
-    r"i'm not sure|i'm confused)\b", re.I
-)
 
 def saw_cta_yes(conversation: str) -> bool:
     """Return True if last USER reply affirms a recent AGENT CTA (case-insensitive, small lookback)."""
@@ -201,41 +167,6 @@ def generate_acknowledgment(utterance: str, intent_name: str, action_policy: str
             "ask_urgency_then_collect": "I understand this is concerning."
         }
         return fallbacks.get(action_policy, "I understand this is important to you.")
-
-def synthesize_clarifier(utter_en: str, candidates: list[dict], target_language: Optional[str]) -> str:
-    """
-    Ask the model for ONE short, candidate-aware clarifying question.
-    Always returns a non-empty string; has a safe fallback.
-    """
-    lang = (target_language or "en").strip().lower()
-    locale_hint = "" if lang in ("", "en") else f"Write it in {lang}."
-    cand_lines = "\n".join([f"- {c.get('name','')} — {c.get('description','')}" for c in candidates][:6])
-
-    system = (
-        "You write ONE short clarifying question to disambiguate intent for a call-center. "
-        "Max 120 characters. No preface, no extra text."
-    )
-    user = (
-        f"Caller said: {utter_en}\n"
-        f"Candidate intents:\n{cand_lines}\n\n"
-        f"Write one clarifying question that helps choose between the likely intents. {locale_hint}"
-    )
-    try:
-        resp = get_openai_client().chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role":"system","content":system},{"role":"user","content":user}],
-            temperature=0.2,
-            max_tokens=50,
-        )
-        q = (resp.choices[0].message.content or "").strip()
-        if not q:
-            raise ValueError("empty")
-        # tiny guardrail to avoid generic filler
-        if len(q) < 6:
-            raise ValueError("too short")
-        return q
-    except Exception:
-        return "Could you share a few more details so I can point you to the right help?"
 
 def _normalize_convo_lines(conversation: str) -> list[tuple[str, str]]:
     if not conversation:
@@ -480,52 +411,20 @@ def classify_with_openai(utter_en: str, candidates: list[dict], target_language:
             "is an affirmative (yes/okay/sure), choose the most appropriate sales/booking intent from the candidate list."
         )
 
-    system_message = """You are a call-center intent classifier. Output ONLY one JSON object that matches the required schema.
-No markdown, no code fences, no extra text.
+    system_message = """You are a call intent classifier. Return ONLY a single JSON object. No markdown. No code fences. No explanations outside JSON.
 
-GOALS
-- Pick exactly one best intent from the candidate list.
-- If the caller's utterance is vague or generic (e.g., "I have a question", "I need help",
-  "a question about warranty", "can you help?", "got an issue"), you MUST:
-  • set needs_clarification=true
-  • provide ONE short, concrete clarifying question tailored to the candidates
-  • keep confidence LOW (≤ 0.6)
-- Do NOT return high confidence unless the caller provides specific details (what/which/when)
-  that clearly disambiguate among candidates.
-- Never invent intents not in the list. The "intent" value MUST be one of the candidate IDs.
+Choose exactly one best intent from the candidate list. If uncertain, set needs_clarification=true and output ONE short question.
 
-CLARIFYING QUESTION RULES
-- Ask exactly ONE sentence (≤120 characters) that helps choose between the top likely intents.
-- Prefer disambiguation like:
-  • "Is this about warranty TERMS, or starting a WARRANTY CLAIM?"
-  • "Are you looking to BOOK a new appointment or RESCHEDULE an existing one?"
-- If a target language is provided, write the question in that language; otherwise use English.
-
-CONFIDENCE POLICY
-- Vague/underspecified → confidence ≤ 0.6 and needs_clarification=true.
-- Confident (>0.8) only when the utterance contains clear, disambiguating details
-  (named product/service, specific action/time, account/order refs).
-- Ambiguous between two candidates → needs_clarification=true with a targeted question.
-
-OUTPUT FORMAT (REQUIRED JSON SCHEMA)
+REQUIRED JSON SCHEMA:
 {
-  "intent": "<one intent_id from the candidate list>",
-  "intent_name": "<human-readable name from candidates>",
-  "confidence": <0.0..1.0>,
-  "needs_clarification": <true|false>,
-  "clarifying_question": "<one short question or empty string>",
-  "explanation": "<one-sentence rationale>"
-}
-
-CONSTRAINTS
-- Use only candidate IDs provided.
-- If you cannot confidently select, set needs_clarification=true and ask the question.
-- Keep the clarifying question specific to the caller's wording and the candidates.""" + cta_hint
-    user_message = (
-        f'Caller (EN): "{utter_en}"\n\n'
-        f'Candidate intents:\n{cand_list}\n\n'
-        f'(Language for clarifying question): {target_language or "en"}'
-    )
+  "intent": "<intent_id_from_candidate_list>",
+  "intent_name": "<human-readable>",
+  "confidence": <number_between_0_and_1>,
+  "needs_clarification": <boolean>,
+  "clarifying_question": "<string_or_null>",
+  "explanation": "<explanation_of_reasoning>"
+}""" + cta_hint + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")
+    user_message = f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'
     
     print(f"=== OPENAI REQUEST ===")
     print(f"Model: gpt-4o-mini")
@@ -658,52 +557,20 @@ def classify_with_openrouter(utter_en: str, candidates: list[dict], target_langu
         )
 
     # Debug logging for OpenRouter request
-    system_message = """You are a call-center intent classifier. Output ONLY one JSON object that matches the required schema.
-No markdown, no code fences, no extra text.
+    system_message = """You are a call intent classifier. Return ONLY a single JSON object. No markdown. No code fences. No explanations outside JSON.
 
-GOALS
-- Pick exactly one best intent from the candidate list.
-- If the caller's utterance is vague or generic (e.g., "I have a question", "I need help",
-  "a question about warranty", "can you help?", "got an issue"), you MUST:
-  • set needs_clarification=true
-  • provide ONE short, concrete clarifying question tailored to the candidates
-  • keep confidence LOW (≤ 0.6)
-- Do NOT return high confidence unless the caller provides specific details (what/which/when)
-  that clearly disambiguate among candidates.
-- Never invent intents not in the list. The "intent" value MUST be one of the candidate IDs.
+Choose exactly one best intent from the candidate list. If uncertain, set needs_clarification=true and output ONE short question.
 
-CLARIFYING QUESTION RULES
-- Ask exactly ONE sentence (≤120 characters) that helps choose between the top likely intents.
-- Prefer disambiguation like:
-  • "Is this about warranty TERMS, or starting a WARRANTY CLAIM?"
-  • "Are you looking to BOOK a new appointment or RESCHEDULE an existing one?"
-- If a target language is provided, write the question in that language; otherwise use English.
-
-CONFIDENCE POLICY
-- Vague/underspecified → confidence ≤ 0.6 and needs_clarification=true.
-- Confident (>0.8) only when the utterance contains clear, disambiguating details
-  (named product/service, specific action/time, account/order refs).
-- Ambiguous between two candidates → needs_clarification=true with a targeted question.
-
-OUTPUT FORMAT (REQUIRED JSON SCHEMA)
+REQUIRED JSON SCHEMA:
 {
-  "intent": "<one intent_id from the candidate list>",
-  "intent_name": "<human-readable name from candidates>",
-  "confidence": <0.0..1.0>,
-  "needs_clarification": <true|false>,
-  "clarifying_question": "<one short question or empty string>",
-  "explanation": "<one-sentence rationale>"
-}
-
-CONSTRAINTS
-- Use only candidate IDs provided.
-- If you cannot confidently select, set needs_clarification=true and ask the question.
-- Keep the clarifying question specific to the caller's wording and the candidates.""" + cta_hint
-    user_message = (
-        f'Caller (EN): "{utter_en}"\n\n'
-        f'Candidate intents:\n{cand_list}\n\n'
-        f'(Language for clarifying question): {target_language or "en"}'
-    )
+  "intent": "<intent_id_from_candidate_list>",
+  "intent_name": "<human-readable>",
+  "confidence": <number_between_0_and_1>,
+  "needs_clarification": <boolean>,
+  "clarifying_question": "<string_or_null>",
+  "explanation": "<explanation_of_reasoning>"
+}""" + cta_hint + (f" If a question is needed, write it in {target_language}." if target_language and target_language != 'en' else "")
+    user_message = f'Caller (EN): "{utter_en}"\n\nCandidate intents:\n{cand_list}'
     
     print(f"=== OPENROUTER REQUEST ===")
     print(f"Model: {CLASSIFY_MODEL}")
@@ -714,15 +581,15 @@ CONSTRAINTS
     
     try:
         resp = get_or_client().chat.completions.create(
-            model=CLASSIFY_MODEL,
-            messages=[
+        model=CLASSIFY_MODEL,
+        messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message}
-            ],
-            response_format={"type": "json_schema", "json_schema": schema}
-        )
-        latency_ms = int((time.time() - t0) * 1000)
-        content = (resp.choices[0].message.content or "{}").strip()
+        ],
+        response_format={"type": "json_schema", "json_schema": schema}
+    )
+    latency_ms = int((time.time() - t0) * 1000)
+    content = (resp.choices[0].message.content or "{}").strip()
         
         # Debug logging
         print(f"OpenRouter response content: '{content}'")
@@ -733,7 +600,7 @@ CONSTRAINTS
         
         # Try to parse the JSON response
         try:
-            parsed = json.loads(content)
+    parsed = json.loads(content)
         except json.JSONDecodeError:
             # If that fails, try to find the JSON object in the response
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
@@ -914,163 +781,40 @@ def classify_intent():
 
     # 2) Decide language based on whichever string is available (prefer embed_query)
     sample_for_lang = (embed_query or context_text or "")
-    if caller_language:
-        c_low = caller_language.lower()
-        is_english = (c_low == "en") or c_low.startswith("en-")
-    else:
+        if caller_language:
+            c_low = caller_language.lower()
+            is_english = (c_low == "en") or c_low.startswith("en-")
+        else:
         detected_lang = _detect_language_simple(sample_for_lang)
-        caller_language = detected_lang
-        is_english = detected_lang == "en"
+            caller_language = detected_lang
+            is_english = detected_lang == "en"
 
     # Translate ONLY when not English
-    if is_english:
+        if is_english:
         ctx_en   = context_text
         query_en = embed_query
         _translate_ms = 0
-    else:
+        else:
         ctx_en, t1 = translate_to_english(context_text)
         query_en, t2 = translate_to_english(embed_query)
         _translate_ms = max(t1, t2)  # keep one latency figure if you log it
 
-    # Language for clarifying question
-    target_lang = normalize_target_language(caller_language)
+        # Language for clarifying question
+        target_lang = normalize_target_language(caller_language)
 
     # 3) Embed + shortlist (use sharp query text)
     if not (query_en or ctx_en):
         return jsonify({"error": "No usable text to embed/classify"}), 400
-    
-    t0 = _now_ms()
+        
     vec, embed_ms, emb_model = embed_english(query_en or ctx_en or "")
-    
-    # L2-normalize query vector to match index expectations
-    import numpy as np
-    def _l2(v): 
-        a = np.asarray(v, dtype=np.float32)
-        n = np.linalg.norm(a) or 1.0
-        return (a / n).tolist()
-    
-    vec = _l2(vec)
-    
-    t1 = _now_ms()
-    vector_mgr = get_vector_mgr()
-    from vector_index import HNSW_OK as _H
-    vector_index_used = "hnsw" if (vector_mgr is not None and _H) else "fallback"
-    if vector_mgr is not None:
-        t_ann_start = _now_ms()
-        top = vector_mgr.topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
-        ann_ms = _now_ms() - t_ann_start
-        print(f"[ANN] used={vector_index_used} topk_len={len(top)} ann_ms={ann_ms}")
-    else:
-        # Fallback to original match_topk if vector index manager failed
-        t_ann_start = _now_ms()
-        top = match_topk(client_id, vec, TOP_K)
-        ann_ms = _now_ms() - t_ann_start
-        print(f"[ANN] used=fallback topk_len={len(top)} ann_ms={ann_ms}")
-    
-    # Validate query vector dimensions
-    if len(vec) != 1536:
-        return jsonify({"error": "bad embedding dimensions", "got": len(vec)}), 400
-
-    intent_ids = [t["intent_id"] for t in top]
-    intents = load_intents(intent_ids)
-    intent_map = {i["id"]: i for i in intents}
-    candidates = [
-        {"id": t["intent_id"],
-         "name": intent_map.get(t["intent_id"], {}).get("name", ""),
-         "description": intent_map.get(t["intent_id"], {}).get("description", "")}
-        for t in top if t["intent_id"] in intent_map
-    ]
+        top = match_topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
+        intent_ids = [t["intent_id"] for t in top]
+        intents = load_intents(intent_ids)
+        candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
+                      for t in top for i in intents if i["id"] == t["intent_id"]]
 
     # Get per-client General Question intent ID
     general_question_id = get_general_question_intent_id(get_supabase_client(), client_id)
-    
-    # Early-exit thresholds (skip LLM for obvious matches)
-    EARLY_SIM_THRESH = 0.97   # only skip LLM for near-identical matches
-    
-    if top:
-        sim0 = top[0]["similarity"]
-        sim1 = top[1]["similarity"] if len(top) > 1 else -1.0
-        # Classic mode: only early-exit on near-identical match
-        if sim0 >= EARLY_SIM_THRESH:
-            best_id = top[0]["intent_id"]
-            best_row = next((i for i in intents if i["id"] == best_id), None)
-            is_general = (best_id == general_question_id)
-            
-            # Avoid early-exit if best is "General Question" and utterance is vague
-            if is_general and VAGUE_RE.search((query_en or ctx_en or "")):
-                pass  # skip early-exit; let LLM handle and ask clarifier
-            else:
-                needs = False
-                routing = None
-                if not is_general:
-                    category = load_category(best_row.get("category_id") if best_row else None)
-                    routing = effective_policy(best_row or {}, category)
-
-                call_id = _resolve_call_id(provided_call_id, retell_event_id)
-
-                # Log early-exit
-                try:
-                    get_supabase_client().table("call_reason_log").insert({
-                        "client_id": client_id,
-                        "call_id": call_id,
-                        "primary_intent_id": (best_row or {}).get("id"),
-                        "confidence": sim0,  # Use actual similarity for early exit
-                        "embedding_top1_sim": sim0,  # Keep cosine similarity separate
-                        "alternatives": [],
-                        "clarifications_json": [],
-                        "llm_model": "skipped-early-exit",
-                        "embedding_model": emb_model,
-                        "llm_latency_ms": 0,
-                        "embed_latency_ms": embed_ms,
-                        "router_version": "v1",
-                        "utterance": _redact_pii(context_text),
-                        "detected_lang": (caller_language.lower() or None),
-                        "utterance_en": _redact_pii(ctx_en),
-                        "explanation": "Early-exit based on vector similarity",
-                        "unmatched_intent": False
-                    }).execute()
-                    print(f"Successfully logged early-exit for call_id: {call_id}")
-                except Exception as e:
-                    print(f"Failed to log early-exit: {e}")
-
-                result_obj = {
-                    "call_id": call_id,
-                    "intent_id": best_id,
-                    "intent_name": next((i["name"] for i in intents if i["id"] == best_id), "General Question" if is_general else None),
-                    "confidence": sim0,  # Use actual similarity for early exit
-                    "needs_clarification": "no",
-                    "clarify_question": "",
-                    "telemetry": {
-                        "embedding_top1_sim": sim0,
-                        "embed_ms": embed_ms,
-                        "ann_ms": ann_ms,
-                        "llm_ms": 0,
-                        "vector_index_used": vector_index_used,
-                        "early_exit": True,
-                        "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
-                    }
-                }
-
-                if routing and (not is_general):
-                    action_policy = routing.get("action_policy")
-                    result_obj.update({
-                        "action_policy": action_policy,
-                        "transfer_number": routing.get("transfer_number"),
-                        "category_name": routing.get("category_name")
-                    })
-                    
-                    # Generate empathetic acknowledgment for transactional intents
-                    if action_policy in ["route_to_agent", "collect_contact", "ask_urgency_then_collect"]:
-                        result_obj["acknowledgment_text"] = generate_acknowledgment(
-                            ctx_en or query_en or "",  # Use the English utterance
-                            result_obj.get("intent_name", ""),
-                            action_policy,
-                            target_lang
-                        )
-
-                return jsonify(result_obj)
-    
-
     
     # ensure General Question is a candidate, even if vector shortlist didn't return it
     if general_question_id and not any(c["id"] == general_question_id for c in candidates):
@@ -1150,54 +894,28 @@ def classify_intent():
     # 4) Classify (use richer context) - Try OpenAI first, fallback to OpenRouter
     try:
         print("Attempting OpenAI classification...")
-        llm_start = _now_ms()
         cls = classify_with_openai(ctx_en or query_en or "", candidates, target_lang, cta_yes)
-        llm_ms = _now_ms() - llm_start
         print("OpenAI classification successful")
     except Exception as e:
         print(f"OpenAI classification failed: {e}")
         print("Falling back to OpenRouter...")
-        # measure the fallback too
-        llm_start = _now_ms()
         cls = classify_with_openrouter(ctx_en or query_en or "", candidates, target_lang, cta_yes)
-        llm_ms = _now_ms() - llm_start
         print("OpenRouter classification completed")
 
+        # Clarifier override (if curated)
+        clarify_q = cls.get("clarify_question") or ""
+        if cls.get("needs_clarification") and len(candidates) >= 2:
+            a = cls.get("best_intent_id") or candidates[0]["id"]
+            b = next((c["id"] for c in candidates if c["id"] != a), None)
+            if b:
+                curated = get_curated_clarifier(a, b)
+                if curated: clarify_q = curated
 
-
-    # Clarifier override (if curated)
-    clarify_q = cls.get("clarify_question") or ""
-    clarifier_source = "llm"  # Track where clarifier came from
-    if cls.get("needs_clarification") and len(candidates) >= 2:
-        a = cls.get("best_intent_id") or candidates[0]["id"]
-        b = next((c["id"] for c in candidates if c["id"] != a), None)
-        if b:
-            curated = get_curated_clarifier(a, b)
-            if curated: 
-                clarify_q = curated
-                clarifier_source = "curated"
-    
-    # Determine clarifier source if not curated
-    if cls.get("needs_clarification") and not clarify_q:
-        clarifier_source = "synth"  # Was synthesized
-    elif cls.get("needs_clarification") and clarify_q and clarifier_source == "llm":
-        clarifier_source = "llm"  # Came from LLM
-
-    # 5) Effective routing
-    best_row = None  # ensure defined before any use
-    best_id = cls.get("best_intent_id") or (candidates[0]["id"] if candidates else None)
+        # 5) Effective routing
+        best_id = cls.get("best_intent_id") or (candidates[0]["id"] if candidates else None)
     
     is_general = (best_id == general_question_id)
     needs = bool(cls.get("needs_clarification"))
-
-    # Guarantee a clarifier for vague + General even when sim is high
-    if is_general and VAGUE_RE.search((query_en or ctx_en or "")):
-        cls["needs_clarification"] = True
-        if not cls.get("clarify_question"):
-            cls["clarify_question"] = synthesize_clarifier(ctx_en or query_en or "", candidates, target_lang)
-        final_confidence = 0.5
-        cls["confidence"] = final_confidence
-        needs = True  # Update needs since we just set it
 
     # Only compute transactional routing when NOT general and NOT needing clarification
     routing = None
@@ -1206,9 +924,9 @@ def classify_intent():
         category = load_category(best_row.get("category_id") if best_row else None)
         routing = effective_policy(best_row or {}, category)
 
-    # 6) Log (rich but safe)
+        # 6) Log (rich but safe)
     call_id = _resolve_call_id(provided_call_id, retell_event_id)
-    try:
+        try:
         get_supabase_client().table("call_reason_log").insert({
                 "client_id": client_id,
                 "call_id": call_id,
@@ -1217,7 +935,6 @@ def classify_intent():
                 "embedding_top1_sim": (top[0]["similarity"] if top else None),
                 "alternatives": (cls.get("alternatives") or [])[:3],
                 "clarifications_json": [{"asked": bool(clarify_q)}] if cls.get("needs_clarification") else [],
-                "clarifier_source": clarifier_source if cls.get("needs_clarification") else None,
                 "llm_model": cls.get("model"),
                 "embedding_model": emb_model,
                 "llm_latency_ms": cls.get("latency_ms"),
@@ -1236,9 +953,9 @@ def classify_intent():
     except Exception as e:
         print(f"Failed to log call_reason_log for call_id {call_id}: {e}")
 
-    # 7) Build result (must be STRING)
-    result_obj = {
-        "call_id": call_id,
+        # 7) Build result (must be STRING)
+        result_obj = {
+            "call_id": call_id,
         "intent_id": best_id,
         "intent_name": next((i["name"] for i in intents if i["id"] == best_id), "General Question" if is_general else None),
             "confidence": cls.get("confidence"),
@@ -1246,11 +963,6 @@ def classify_intent():
         "clarify_question": clarify_q if needs else "",
             "telemetry": {
                 "embedding_top1_sim": (top[0]["similarity"] if top else None),
-                "embed_ms": embed_ms,
-                "ann_ms": ann_ms,
-                "llm_ms": llm_ms,
-                "vector_index_used": vector_index_used,
-                "early_exit": False,
                 "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
             }
         }
@@ -1258,7 +970,7 @@ def classify_intent():
     # If general (and not needing clarification): attach KB answer and set answer_from_kb action policy
     if (not needs) and is_general:
         try:
-            kb_rows = kb_future.result(timeout=0.15)  # allow more time for KB RPC
+            kb_rows = kb_future.result(timeout=0.01)  # non-blocking; it likely finished already
         except Exception:
             kb_rows = []
         top_kb = kb_rows[0] if kb_rows else None
@@ -1319,157 +1031,3 @@ def classify_intent():
             )
 
     return jsonify(result_obj)
-
-# Simple rate limiting for refresh endpoint
-_refresh_attempts = {}  # client_id -> (count, reset_time)
-_rate_lock = threading.RLock()
-
-@classify_bp.route("/health/vector-index", methods=["GET"])
-def health_vector_index():
-    """Health check for vector index dependencies"""
-    try:
-        import hnswlib
-        hnswlib_version = getattr(hnswlib, "__version__", "unknown")  # safer
-        hnswlib_available = True
-        hnswlib_error = None
-    except ImportError as e:
-        hnswlib_version = None
-        hnswlib_available = False
-        hnswlib_error = str(e)
-    
-    try:
-        import numpy
-        numpy_version = numpy.__version__
-        numpy_available = True
-        numpy_error = None
-    except ImportError as e:
-        numpy_version = None
-        numpy_available = False
-        numpy_error = str(e)
-    
-    try:
-        vector_index_available = VECTOR_INDEX_AVAILABLE
-    except:
-        vector_index_available = False
-    
-    try:
-        vector_mgr_initialized = _vector_mgr is not None
-    except:
-        vector_mgr_initialized = False
-    
-    return jsonify({
-        "hnswlib": {
-            "available": hnswlib_available,
-            "version": hnswlib_version,
-            "error": hnswlib_error
-        },
-        "numpy": {
-            "available": numpy_available,
-            "version": numpy_version,
-            "error": numpy_error
-        },
-        "vector_index_available": vector_index_available,
-        "vector_mgr_initialized": vector_mgr_initialized
-    })
-
-@classify_bp.route("/refresh-index", methods=["POST"])
-def refresh_index():
-    """Refresh the local vector index for a specific client"""
-    body = request.get_json(silent=True) or {}
-    client_id = body.get("client_id")
-    token = request.headers.get("X-Index-Admin-Token")
-
-    if token != os.getenv("INDEX_ADMIN_TOKEN"):
-        return jsonify({"error": "unauthorized"}), 401
-    if not client_id:
-        return jsonify({"error": "missing client_id"}), 400
-    
-    # Rate limiting: max 5 refreshes per client per minute
-    current_time = time.time()
-    with _rate_lock:
-        if client_id in _refresh_attempts:
-            count, reset_time = _refresh_attempts[client_id]
-            if current_time < reset_time:
-                if count >= 5:
-                    return jsonify({"error": "rate limit exceeded"}), 429
-                _refresh_attempts[client_id] = (count + 1, reset_time)
-            else:
-                _refresh_attempts[client_id] = (1, current_time + 60)
-        else:
-            _refresh_attempts[client_id] = (1, current_time + 60)
-    
-    try:
-        get_vector_mgr().refresh_client(client_id)
-        return jsonify({"ok": True, "client_id": client_id})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@classify_bp.route("/index-stats/<client_id>", methods=["GET"])
-def index_stats(client_id):
-    """Get stats about the local vector index for a client"""
-    try:
-        vector_mgr = get_vector_mgr()
-        if vector_mgr is None:
-            return jsonify({"error": "Vector index manager not available"}), 500
-        
-        ci = vector_mgr._by_client.get(client_id)
-        payload = {
-            "hnsw_ok": getattr(__import__('vector_index'), 'HNSW_OK', False),
-            "last_refresh_at": getattr(vector_mgr, "_last_refresh_at", 0)
-        }
-        
-        if not ci:
-            payload.update({"built": False, "size": 0, "ef": 0, "M": 32})
-            return jsonify(payload)
-        
-        with ci._lock:
-            ef_val = 0
-            try:
-                ef_val = ci.index.get_ef() if ci.index else 0  # hnswlib supports get_ef()
-            except Exception:
-                ef_val = 64
-            payload.update({
-                "built": ci._built, 
-                "size": len(ci.intent_ids),
-                "ef": ef_val,
-                "M": 32,
-                "last_refresh": vector_mgr._client_versions.get(client_id),
-                # optional: report engine
-                "engine": "hnsw" if getattr(__import__('vector_index'), 'HNSW_OK', False) else "rpc"
-            })
-            return jsonify(payload)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@classify_bp.route("/debug-embedding/<client_id>", methods=["GET"])
-def debug_embedding(client_id):
-    """Debug endpoint to peek at embedding data format"""
-    token = request.headers.get("X-Index-Admin-Token")
-    if token != os.getenv("INDEX_ADMIN_TOKEN"):
-        return jsonify({"error":"unauthorized"}), 401
-    
-    try:
-        rows = get_supabase_client().table("intent_embedding") \
-            .select("intent_id,embedding").eq("client_id", client_id).limit(1).execute()
-        row = (rows.data or [None])[0]
-        if not row:
-            return jsonify({"ok": False, "reason":"no rows"})
-        
-        from vector_index import _coerce_vec_any
-        try:
-            v = _coerce_vec_any(row["embedding"])
-            return jsonify({
-                "ok": True, 
-                "intent_id": row["intent_id"], 
-                "dims": len(v), 
-                "head3": v[:3],
-                "raw_type": str(type(row["embedding"]))
-            })
-        except Exception as e:
-            return jsonify({
-                "ok": False, 
-                "error": str(e), 
-                "raw_type": str(type(row["embedding"]))
-            })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
