@@ -9,8 +9,8 @@ from supabase import Client as SupabaseClient
 
 log = logging.getLogger("vector_index")
 
-# Configurable refresh interval
-REFRESH_MIN_SECONDS = float(os.getenv("INDEX_REFRESH_MIN_SECONDS", "300"))
+# Configurable refresh interval - set very high to disable hot-path refreshes
+REFRESH_MIN_SECONDS = float(os.getenv("INDEX_REFRESH_MIN_SECONDS", "3600"))
 
 try:
     import hnswlib
