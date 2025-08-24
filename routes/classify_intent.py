@@ -894,7 +894,7 @@ def classify_intent():
     # Early-exit thresholds (skip LLM for obvious matches)
     EARLY_SIM_THRESH = 0.92
     EARLY_MARGIN = 0.15  # Increased from 0.08 to be more conservative
-    LOW_SIM_FLOOR = 0.55  # Skip LLM if all similarities below this (increased from 0.35)
+    LOW_SIM_FLOOR = 0.2  # Skip LLM if all similarities below this
     
     if top:
         sim0 = top[0]["similarity"]
