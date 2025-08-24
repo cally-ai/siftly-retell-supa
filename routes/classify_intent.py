@@ -577,15 +577,9 @@ CONSTRAINTS
         else:
             needs_clarification_bool = bool(needs_clarification_value)
             
-        # Force clarification for low-confidence classifications
-        confidence = parsed.get("confidence", 0.5)
-        if confidence < 0.7 and not needs_clarification_bool:
-            needs_clarification_bool = True
-            # Keep the LLM's clarifying question if it provided one
-            
         result = {
             "best_intent_id": parsed.get("intent") or "",
-            "confidence": confidence,
+            "confidence": parsed.get("confidence", 0.5),
             "needs_clarification": needs_clarification_bool,
             "clarify_question": parsed.get("clarifying_question") or "",
             "alternatives": [],
@@ -766,15 +760,9 @@ CONSTRAINTS
         else:
             needs_clarification_bool = bool(needs_clarification_value)
             
-        # Force clarification for low-confidence classifications
-        confidence = parsed.get("confidence", 0.5)
-        if confidence < 0.7 and not needs_clarification_bool:
-            needs_clarification_bool = True
-            # Keep the LLM's clarifying question if it provided one
-            
         result = {
             "best_intent_id": parsed.get("intent") or "",
-            "confidence": confidence,
+            "confidence": parsed.get("confidence", 0.5),
             "needs_clarification": needs_clarification_bool,  # Convert to boolean for the result
             "clarify_question": parsed.get("clarifying_question") or "",
             "alternatives": [],  # No longer used in new schema
@@ -1270,7 +1258,7 @@ def classify_intent():
     # If general (and not needing clarification): attach KB answer and set answer_from_kb action policy
     if (not needs) and is_general:
         try:
-            kb_rows = kb_future.result(timeout=0.01)  # non-blocking; it likely finished already
+            kb_rows = kb_future.result(timeout=0.15)  # allow more time for KB RPC
         except Exception:
             kb_rows = []
         top_kb = kb_rows[0] if kb_rows else None
