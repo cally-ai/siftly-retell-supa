@@ -505,9 +505,15 @@ REQUIRED JSON SCHEMA:
         else:
             needs_clarification_bool = bool(needs_clarification_value)
             
+        # Force clarification for low-confidence classifications
+        confidence = parsed.get("confidence", 0.5)
+        if confidence < 0.7 and not needs_clarification_bool:
+            needs_clarification_bool = True
+            parsed["clarifying_question"] = "Could you tell me a bit more about what you need help with?"
+            
         result = {
             "best_intent_id": parsed.get("intent") or "",
-            "confidence": parsed.get("confidence", 0.5),
+            "confidence": confidence,
             "needs_clarification": needs_clarification_bool,
             "clarify_question": parsed.get("clarifying_question") or "",
             "alternatives": [],
@@ -656,9 +662,15 @@ REQUIRED JSON SCHEMA:
         else:
             needs_clarification_bool = bool(needs_clarification_value)
             
+        # Force clarification for low-confidence classifications
+        confidence = parsed.get("confidence", 0.5)
+        if confidence < 0.7 and not needs_clarification_bool:
+            needs_clarification_bool = True
+            parsed["clarifying_question"] = "Could you tell me a bit more about what you need help with?"
+            
         result = {
             "best_intent_id": parsed.get("intent") or "",
-            "confidence": parsed.get("confidence", 0.5),
+            "confidence": confidence,
             "needs_clarification": needs_clarification_bool,  # Convert to boolean for the result
             "clarify_question": parsed.get("clarifying_question") or "",
             "alternatives": [],  # No longer used in new schema
