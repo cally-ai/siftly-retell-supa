@@ -809,6 +809,10 @@ def classify_intent():
     top = match_topk(client_id, vec, TOP_K)  # [{intent_id, similarity}]
     intent_ids = [t["intent_id"] for t in top]
     intents = load_intents(intent_ids)
+    
+    # Create mapping from intent_id to intent_name for topK telemetry
+    intent_name_map = {i["id"]: i["name"] for i in intents}
+    
     candidates = [{"id": i["id"], "name": i["name"], "description": i.get("description","")}
                   for t in top for i in intents if i["id"] == t["intent_id"]]
 
@@ -962,7 +966,7 @@ def classify_intent():
         "clarify_question": clarify_q if needs else "",
         "telemetry": {
             "embedding_top1_sim": (top[0]["similarity"] if top else None),
-            "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
+            "topK": [{"rank": i+1, "intent_name": intent_name_map.get(t["intent_id"], "Unknown"), "sim": t["similarity"]} for i, t in enumerate(top)]
         }
     }
 
