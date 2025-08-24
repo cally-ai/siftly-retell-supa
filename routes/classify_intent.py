@@ -509,7 +509,7 @@ REQUIRED JSON SCHEMA:
         confidence = parsed.get("confidence", 0.5)
         if confidence < 0.7 and not needs_clarification_bool:
             needs_clarification_bool = True
-            parsed["clarifying_question"] = "Could you tell me a bit more about what you need help with?"
+            # Keep the LLM's clarifying question if it provided one
             
         result = {
             "best_intent_id": parsed.get("intent") or "",
@@ -666,7 +666,7 @@ REQUIRED JSON SCHEMA:
         confidence = parsed.get("confidence", 0.5)
         if confidence < 0.7 and not needs_clarification_bool:
             needs_clarification_bool = True
-            parsed["clarifying_question"] = "Could you tell me a bit more about what you need help with?"
+            # Keep the LLM's clarifying question if it provided one
             
         result = {
             "best_intent_id": parsed.get("intent") or "",
@@ -1003,18 +1003,27 @@ def classify_intent():
         except Exception as e:
             print(f"Failed to log low-similarity case: {e}")
 
+        # Let the LLM write a clarifier; we'll ignore the intent it picks
+        try:
+            cls = classify_with_openai(ctx_en or query_en or "", candidates, target_lang, cta_yes=False)
+            clar_q = cls.get("clarify_question") or "What do you need help with?"
+            llm_ms = cls.get("latency_ms", 0)
+        except Exception:
+            clar_q = "What do you need help with?"
+            llm_ms = 0
+
         return jsonify({
             "call_id": call_id,
             "intent_id": None,
             "intent_name": None,
             "confidence": 0.0,
             "needs_clarification": "yes",
-            "clarify_question": "Could you tell me a bit more about what you need help with?",
+            "clarify_question": clar_q,
             "telemetry": {
                 "embedding_top1_sim": top[0]["similarity"] if top else None,
                 "embed_ms": embed_ms,
                 "ann_ms": ann_ms,
-                "llm_ms": 0,
+                "llm_ms": llm_ms,
                 "vector_index_used": vector_index_used,
                 "early_exit": False,
                 "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
@@ -1123,7 +1132,7 @@ def classify_intent():
     # Force clarification when evidence is weak
     if sim0 < 0.55 or final_confidence < 0.7:
         cls["needs_clarification"] = True
-        cls["clarify_question"] = "Could you tell me a bit more about what you need help with?"
+        # Keep the LLM's clarifying question if it provided one
         final_confidence = 0.5  # Reset confidence when forcing clarification
     
     # Update the classification result
