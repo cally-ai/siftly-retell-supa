@@ -64,18 +64,6 @@ def create_app(config_name=None):
     # app.register_blueprint(ivr_bp)
     app.register_blueprint(classify_bp, url_prefix="")  # Enable intent classification
     
-    # Initialize vector index in this worker
-    try:
-        from routes.classify_intent import get_vector_mgr
-        print("[APP] Initializing vector index manager...")
-        vector_mgr = get_vector_mgr()
-        if vector_mgr:
-            print("[APP] Vector index manager warmed up successfully")
-        else:
-            print("[APP] Vector index manager not available - using fallback")
-    except Exception as e:
-        print(f"[APP] Vector index initialization failed: {e}")
-    
     # Error handlers
     @app.errorhandler(404)
     def not_found(error):

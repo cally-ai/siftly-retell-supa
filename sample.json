@@ -1,7 +1,0 @@
-{
-  "call": {
-    "transcript": "User: I need to book an appointment for a site survey.\nAgent: Would you like to schedule this week?\nUser: yes",
-    "call_id": "call_smoke_1",
-    "retell_llm_dynamic_variables": { "client_id": "94ec6461-9466-44f2-9938-9e9a3e60ab39" }
-  }
-}
