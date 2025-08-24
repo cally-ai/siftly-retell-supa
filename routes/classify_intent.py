@@ -91,7 +91,11 @@ ACK_REGEX = re.compile(
 CTA_RE   = re.compile(r'\b(quote|estimate|site (?:survey|assessment)|appointment|book|schedule)\b', re.I)
 NEG_RE   = re.compile(r'^(?:no|nope|nah|not now|maybe later)\W*$', re.I)
 SALES_INTENT_RE = re.compile(r'\b(quote|estimate|book|schedule|appointment|assessment|demo|consult|sales)\b', re.I)
-VAGUE_RE = re.compile(r"\b(i\s*(have|got)?\s*(a|one)?\s*(question|issue|problem)|need help|can you help)\b", re.I)
+VAGUE_RE = re.compile(
+    r"\b(i\s*(have|got)?\s*(a|one)?\s*(question|issue|problem)|"
+    r"(need|needing)\s*help|can you help|have a quick question|"
+    r"i'm not sure|i'm confused)\b", re.I
+)
 
 def saw_cta_yes(conversation: str) -> bool:
     """Return True if last USER reply affirms a recent AGENT CTA (case-insensitive, small lookback)."""
@@ -978,8 +982,9 @@ def classify_intent():
     # Validate query vector dimensions
     if len(vec) != 1536:
         return jsonify({"error": "bad embedding dimensions", "got": len(vec)}), 400
-        intent_ids = [t["intent_id"] for t in top]
-        intents = load_intents(intent_ids)
+
+    intent_ids = [t["intent_id"] for t in top]
+    intents = load_intents(intent_ids)
     intent_map = {i["id"]: i for i in intents}
     candidates = [
         {"id": t["intent_id"],
@@ -1252,12 +1257,21 @@ def classify_intent():
 
     # Clarifier override (if curated)
     clarify_q = cls.get("clarify_question") or ""
+    clarifier_source = "llm"  # Track where clarifier came from
     if cls.get("needs_clarification") and len(candidates) >= 2:
         a = cls.get("best_intent_id") or candidates[0]["id"]
         b = next((c["id"] for c in candidates if c["id"] != a), None)
         if b:
             curated = get_curated_clarifier(a, b)
-            if curated: clarify_q = curated
+            if curated: 
+                clarify_q = curated
+                clarifier_source = "curated"
+    
+    # Determine clarifier source if not curated
+    if cls.get("needs_clarification") and not clarify_q:
+        clarifier_source = "synth"  # Was synthesized
+    elif cls.get("needs_clarification") and clarify_q and clarifier_source == "llm":
+        clarifier_source = "llm"  # Came from LLM
 
     # 5) Effective routing
     best_row = None  # ensure defined before any use
@@ -1265,6 +1279,15 @@ def classify_intent():
     
     is_general = (best_id == general_question_id)
     needs = bool(cls.get("needs_clarification"))
+
+    # Guarantee a clarifier for vague + General even when sim is high
+    if is_general and VAGUE_RE.search((query_en or ctx_en or "")):
+        cls["needs_clarification"] = True
+        if not cls.get("clarify_question"):
+            cls["clarify_question"] = synthesize_clarifier(ctx_en or query_en or "", candidates, target_lang)
+        final_confidence = 0.5
+        cls["confidence"] = final_confidence
+        needs = True  # Update needs since we just set it
 
     # Only compute transactional routing when NOT general and NOT needing clarification
     routing = None
@@ -1284,6 +1307,7 @@ def classify_intent():
                 "embedding_top1_sim": (top[0]["similarity"] if top else None),
                 "alternatives": (cls.get("alternatives") or [])[:3],
                 "clarifications_json": [{"asked": bool(clarify_q)}] if cls.get("needs_clarification") else [],
+                "clarifier_source": clarifier_source if cls.get("needs_clarification") else None,
                 "llm_model": cls.get("model"),
                 "embedding_model": emb_model,
                 "llm_latency_ms": cls.get("latency_ms"),
