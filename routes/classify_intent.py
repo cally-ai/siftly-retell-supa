@@ -894,7 +894,7 @@ def classify_intent():
     # Early-exit thresholds (skip LLM for obvious matches)
     EARLY_SIM_THRESH = 0.92
     EARLY_MARGIN = 0.15  # Increased from 0.08 to be more conservative
-    LOW_SIM_FLOOR = 0.35  # Skip LLM if all similarities below this
+    LOW_SIM_FLOOR = 0.55  # Skip LLM if all similarities below this (increased from 0.35)
     
     if top:
         sim0 = top[0]["similarity"]
@@ -1112,6 +1112,23 @@ def classify_intent():
         llm_ms = _now_ms() - llm_start
         print("OpenRouter classification completed")
 
+    # Evidence-aware decisioning: Cap LLM confidence by vector evidence
+    sim0 = top[0]["similarity"] if top else 0.0
+    llm_confidence = cls.get("confidence", 0.5)
+    
+    # Cap LLM confidence by vector evidence to prevent overconfidence
+    cap = max(0.5, min(0.95, 0.3 + sim0))  # e.g., sim 0.49 -> cap ≈ 0.79
+    final_confidence = min(llm_confidence, cap)
+    
+    # Force clarification when evidence is weak
+    if sim0 < 0.55 or final_confidence < 0.7:
+        cls["needs_clarification"] = True
+        cls["clarify_question"] = "Could you tell me a bit more about what you need help with?"
+        final_confidence = 0.5  # Reset confidence when forcing clarification
+    
+    # Update the classification result
+    cls["confidence"] = final_confidence
+    
     # Clarifier override (if curated)
     clarify_q = cls.get("clarify_question") or ""
     if cls.get("needs_clarification") and len(candidates) >= 2:
