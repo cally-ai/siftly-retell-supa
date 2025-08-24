@@ -997,15 +997,13 @@ def classify_intent():
     general_question_id = get_general_question_intent_id(get_supabase_client(), client_id)
     
     # Early-exit thresholds (skip LLM for obvious matches)
-    EARLY_SIM_THRESH = 0.92
-    EARLY_MARGIN = 0.15  # Increased from 0.08 to be more conservative
-    LOW_SIM_FLOOR = 0.2  # Skip LLM if all similarities below this
+    EARLY_SIM_THRESH = 0.97   # only skip LLM for near-identical matches
     
     if top:
         sim0 = top[0]["similarity"]
         sim1 = top[1]["similarity"] if len(top) > 1 else -1.0
-        # Only early-exit if we have high confidence OR a very clear winner
-        if (sim0 >= EARLY_SIM_THRESH) or (sim0 >= 0.75 and sim0 - sim1 >= EARLY_MARGIN):
+        # Classic mode: only early-exit on near-identical match
+        if sim0 >= EARLY_SIM_THRESH:
             best_id = top[0]["intent_id"]
             best_row = next((i for i in intents if i["id"] == best_id), None)
             is_general = (best_id == general_question_id)
@@ -1084,63 +1082,7 @@ def classify_intent():
 
                 return jsonify(result_obj)
     
-    # Skip LLM on poor candidate sets
-    if not top or top[0]["similarity"] < LOW_SIM_FLOOR:
-        call_id = _resolve_call_id(provided_call_id, retell_event_id)
-        
-        # Log low similarity case
-        try:
-            get_supabase_client().table("call_reason_log").insert({
-                "client_id": client_id,
-                "call_id": call_id,
-                "primary_intent_id": None,
-                "confidence": 0.0,
-                "embedding_top1_sim": top[0]["similarity"] if top else None,
-                "alternatives": [],
-                "clarifications_json": [{"asked": True}],
-                "llm_model": "skipped-low-similarity",
-                "embedding_model": emb_model,
-                "llm_latency_ms": 0,
-                "embed_latency_ms": embed_ms,
-                "router_version": "v1",
-                "utterance": _redact_pii(context_text),
-                "detected_lang": (caller_language.lower() or None),
-                "utterance_en": _redact_pii(ctx_en),
-                "explanation": "Low similarity - no clear intent match",
-                "unmatched_intent": True
-            }).execute()
-            print(f"Successfully logged low-similarity case for call_id: {call_id}")
-        except Exception as e:
-            print(f"Failed to log low-similarity case: {e}")
 
-        # Let the LLM write a clarifier; we'll ignore the intent it picks
-        try:
-            cls = classify_with_openai(ctx_en or query_en or "", candidates, target_lang, cta_yes=False)
-            clar_q = cls.get("clarify_question")
-            if not clar_q:
-                clar_q = synthesize_clarifier(ctx_en or query_en or "", candidates, target_lang)
-            llm_ms = cls.get("latency_ms", 0)
-        except Exception:
-            clar_q = synthesize_clarifier(ctx_en or query_en or "", candidates, target_lang)
-            llm_ms = 0
-
-        return jsonify({
-            "call_id": call_id,
-            "intent_id": None,
-            "intent_name": None,
-            "confidence": 0.0,
-            "needs_clarification": "yes",
-            "clarify_question": clar_q,
-            "telemetry": {
-                "embedding_top1_sim": top[0]["similarity"] if top else None,
-                "embed_ms": embed_ms,
-                "ann_ms": ann_ms,
-                "llm_ms": llm_ms,
-                "vector_index_used": vector_index_used,
-                "early_exit": False,
-                "topK": [{"rank": i+1, "intent_id": t["intent_id"], "sim": t["similarity"]} for i, t in enumerate(top)]
-            }
-        })
     
     # ensure General Question is a candidate, even if vector shortlist didn't return it
     if general_question_id and not any(c["id"] == general_question_id for c in candidates):
@@ -1233,27 +1175,7 @@ def classify_intent():
         llm_ms = _now_ms() - llm_start
         print("OpenRouter classification completed")
 
-    # Evidence-aware decisioning: Cap LLM confidence by vector evidence
-    sim0 = top[0]["similarity"] if top else 0.0
-    llm_confidence = cls.get("confidence", 0.5)
-    
-    # Cap LLM confidence by vector evidence to prevent overconfidence
-    cap = max(0.5, min(0.95, 0.3 + sim0))  # e.g., sim 0.49 -> cap ≈ 0.79
-    final_confidence = min(llm_confidence, cap)
-    
-    # Force clarification when evidence is weak
-    if sim0 < 0.55 or final_confidence < 0.7:
-        cls["needs_clarification"] = True
-        final_confidence = 0.5  # Reset confidence when forcing clarification
-        if not cls.get("clarify_question"):
-            cls["clarify_question"] = synthesize_clarifier(
-                ctx_en or query_en or "",
-                candidates,
-                target_lang
-            )
-    
-    # Update the classification result
-    cls["confidence"] = final_confidence
+
 
     # Clarifier override (if curated)
     clarify_q = cls.get("clarify_question") or ""
