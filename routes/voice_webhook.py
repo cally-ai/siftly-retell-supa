@@ -31,8 +31,14 @@ class VoiceWebhookService:
             logger.warning("PUBLIC_HOSTNAME not configured - will use default")
             self.public_hostname = "siftly-retell-supa.onrender.com"  # Default fallback
         else:
-            # Remove protocol if present
-            self.public_hostname = self.public_hostname.replace("https://", "").replace("http://", "")
+            # Extract just the hostname from the full WebSocket URL
+            # Example: "wss://siftly-retell-supa.onrender.com/transcription/stream" -> "siftly-retell-supa.onrender.com"
+            if self.public_hostname.startswith("wss://"):
+                self.public_hostname = self.public_hostname.replace("wss://", "").split("/")[0]
+            elif self.public_hostname.startswith("https://"):
+                self.public_hostname = self.public_hostname.replace("https://", "").split("/")[0]
+            elif self.public_hostname.startswith("http://"):
+                self.public_hostname = self.public_hostname.replace("http://", "").split("/")[0]
 
     def get_supabase_client(self) -> Client:
         """Get Supabase client using your existing pattern"""
@@ -99,7 +105,7 @@ class VoiceWebhookService:
                 "from_number": from_number,
                 "to_number": to_number,
                 "direction": "inbound",
-                "metadata": {
+                "retell_llm_dynamic_variables": {
                     "caller_id": from_number,
                     "callee_id": to_number,
                     "call_type": "inbound",
