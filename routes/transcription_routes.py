@@ -150,12 +150,16 @@ def transcription_stream(ws):
             etype = evt.get("event")
 
             if etype == "start":
-                call_sid = evt.get("start", {}).get("callSid")
+                media_stream_call_sid = evt.get("start", {}).get("callSid")
                 logger.info(f"=== MEDIA STREAM START ===")
-                logger.info(f"CallSid: {call_sid}")
+                logger.info(f"Media Stream CallSid: {media_stream_call_sid}")
                 logger.info(f"Full start event: {evt}")
                 logger.info("=== END MEDIA STREAM START ===")
-                # Note: twilio_call record will be created by call_started webhook with correct CallSid
+                
+                # For now, use the Media Stream CallSid and let the database operations fail gracefully
+                # The real solution is to modify the call_started webhook to create a record with the Media Stream CallSid
+                call_sid = media_stream_call_sid
+                logger.info(f"Using Media Stream CallSid for transcription: {call_sid}")
 
             elif etype == "media":
                 payload_b64 = evt.get("media", {}).get("payload")

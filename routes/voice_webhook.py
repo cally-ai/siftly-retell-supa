@@ -214,9 +214,10 @@ class VoiceWebhookService:
                 logger.error(f"Failed to get or create caller for: {from_number}")
                 return self._get_default_dynamic_variables(from_number, to_number)
             
-            # Add retell_event_id and caller_id to dynamic variables
+            # Add retell_event_id, caller_id, and original_call_sid to dynamic variables
             dynamic_variables['retell_event_id'] = retell_event_id
             dynamic_variables['caller_id'] = caller_id
+            dynamic_variables['original_call_sid'] = original_call_sid  # Media Stream CallSid
 
             logger.info(f"Dynamic variables built successfully: {list(dynamic_variables.keys())}")
             return dynamic_variables
@@ -377,7 +378,7 @@ def voice_webhook():
         # Twilio form payload
         from_number = request.form.get("From")
         to_number = request.form.get("To")
-        call_sid = request.form.get("CallSid")
+        original_call_sid = request.form.get("CallSid")  # This is the Media Stream CallSid
 
         logger.info(f"/voice-webhook payload: {dict(request.form)}")
 

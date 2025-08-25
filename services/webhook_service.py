@@ -773,11 +773,12 @@ class WebhookService:
             # Extract dynamic variables if present
             retell_llm_dynamic_variables = call_data.get('retell_llm_dynamic_variables', {})
             
-            # Get retell_event_id and caller_id from dynamic variables
+            # Get retell_event_id, caller_id, and original_call_sid from dynamic variables
             retell_event_id = retell_llm_dynamic_variables.get('retell_event_id')
             caller_id = retell_llm_dynamic_variables.get('caller_id')
+            original_call_sid = retell_llm_dynamic_variables.get('original_call_sid')  # Media Stream CallSid
             
-            logger.info(f"Updating retell_event for call_started event - Call ID: {call_id}, Retell Event ID: {retell_event_id}, Twilio SID: {twilio_call_sid}")
+            logger.info(f"Updating retell_event for call_started event - Call ID: {call_id}, Retell Event ID: {retell_event_id}, Twilio SID: {twilio_call_sid}, Original CallSid: {original_call_sid}")
             
             if not retell_event_id:
                 logger.error("No retell_event_id found in dynamic variables")
@@ -801,9 +802,11 @@ class WebhookService:
             logger.info(f"Updated retell_event record with ID: {retell_event_id}")
             
             # 2. Create twilio_call record (if we have a Twilio call SID)
-            if twilio_call_sid and caller_id:
+            if original_call_sid and caller_id:
+                # Use the original_call_sid (Media Stream CallSid) for the database record
+                # This ensures transcription can find the correct record
                 twilio_call_data = {
-                    'call_sid': twilio_call_sid,
+                    'call_sid': original_call_sid,  # Media Stream CallSid
                     'from_number': from_number,
                     'to_number': to_number,
                     'direction': direction,
@@ -817,8 +820,8 @@ class WebhookService:
                 else:
                     logger.info(f"Created twilio_call record with ID: {twilio_response.data[0]['id'] if twilio_response.data else 'unknown'}")
             else:
-                if not twilio_call_sid:
-                    logger.warning("No Twilio call SID found, skipping twilio_call record creation")
+                if not original_call_sid:
+                    logger.warning("No original_call_sid found in dynamic variables, skipping twilio_call record creation")
                 if not caller_id:
                     logger.warning("No caller_id found in dynamic variables, skipping twilio_call record creation")
                 
