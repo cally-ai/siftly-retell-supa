@@ -166,9 +166,14 @@ def transcription_stream(ws):
                 if payload_b64:
                     audio_bytes = base64.b64decode(payload_b64)
                     audio_queue.append(audio_bytes)
-                    logger.debug(f"Received audio chunk: {len(audio_bytes)} bytes")
+                    logger.info(f"=== AUDIO CHUNK RECEIVED ===")
+                    logger.info(f"CallSid: {call_sid}")
+                    logger.info(f"Audio chunk size: {len(audio_bytes)} bytes")
+                    logger.info(f"Media event: {evt}")
+                    logger.info("=== END AUDIO CHUNK ===")
                 else:
                     logger.warning("Media event without payload")
+                    logger.warning(f"Full media event: {evt}")
 
             elif etype == "stop":
                 logger.info(f"=== MEDIA STREAM STOP ===")
@@ -176,6 +181,11 @@ def transcription_stream(ws):
                 logger.info(f"Full stop event: {evt}")
                 logger.info("=== END MEDIA STREAM STOP ===")
                 break
+            else:
+                logger.info(f"=== UNKNOWN EVENT TYPE ===")
+                logger.info(f"Event type: {etype}")
+                logger.info(f"Full event: {evt}")
+                logger.info("=== END UNKNOWN EVENT ===")
 
             # Process Deepgram events
             while events_queue:
