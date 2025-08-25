@@ -110,7 +110,9 @@ def transcription_stream(ws):
             logger.info("Deepgram WebSocket connection closed")
         
         def on_open(ws):
-            logger.info("Deepgram WebSocket connection opened")
+            logger.info("=== DEEPGRAM WEBSOCKET OPENED ===")
+            logger.info("Deepgram WebSocket connection opened and ready")
+            logger.info("=== END DEEPGRAM WEBSOCKET OPENED ===")
         
         dg_ws = websocket.WebSocketApp(
             DEEPGRAM_WSS,
@@ -123,6 +125,10 @@ def transcription_stream(ws):
         
         def sender():
             chunk_count = 0
+            logger.info(f"=== AUDIO SENDER STARTED ===")
+            logger.info(f"Audio queue initial size: {len(audio_queue)}")
+            logger.info("=== END AUDIO SENDER STARTED ===")
+            
             while True:
                 if audio_queue:
                     chunk = audio_queue.pop(0)
@@ -134,15 +140,17 @@ def transcription_stream(ws):
                     try:
                         dg_ws.send(chunk, websocket.ABNF.OPCODE_BINARY)
                         chunk_count += 1
-                        if chunk_count % 100 == 0:  # Log every 100 chunks
+                        if chunk_count <= 10 or chunk_count % 50 == 0:  # Log first 10 chunks, then every 50
                             logger.info(f"=== AUDIO SENDER PROGRESS ===")
                             logger.info(f"Chunks sent to Deepgram: {chunk_count}")
                             logger.info(f"Chunk size: {len(chunk)} bytes")
+                            logger.info(f"Audio queue remaining: {len(audio_queue)}")
                             logger.info("=== END AUDIO SENDER PROGRESS ===")
                     except Exception as e:
                         logger.error(f"=== AUDIO SENDER ERROR ===")
                         logger.error(f"Error sending chunk to Deepgram: {e}")
                         logger.error(f"Chunk count: {chunk_count}")
+                        logger.error(f"Audio queue size: {len(audio_queue)}")
                         logger.error("=== END AUDIO SENDER ERROR ===")
                         break
                 else:
