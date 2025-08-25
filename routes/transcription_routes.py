@@ -104,10 +104,16 @@ def transcription_stream(ws):
                 logger.error("=== END DEEPGRAM MESSAGE ERROR ===")
         
         def on_error(ws, error):
-            logger.error(f"Deepgram WebSocket error: {error}")
+            logger.error(f"=== DEEPGRAM WEBSOCKET ERROR ===")
+            logger.error(f"Error: {error}")
+            logger.error(f"Error type: {type(error)}")
+            logger.error("=== END DEEPGRAM WEBSOCKET ERROR ===")
         
         def on_close(ws, close_status_code, close_msg):
-            logger.info("Deepgram WebSocket connection closed")
+            logger.info(f"=== DEEPGRAM WEBSOCKET CLOSED ===")
+            logger.info(f"Close status code: {close_status_code}")
+            logger.info(f"Close message: {close_msg}")
+            logger.info("=== END DEEPGRAM WEBSOCKET CLOSED ===")
         
         def on_open(ws):
             logger.info("=== DEEPGRAM WEBSOCKET OPENED ===")
