@@ -98,6 +98,10 @@ def transcription_stream(ws):
     # Queues
     audio_queue = []
     events_queue = []
+    
+    # Throttling for partial updates (avoid spam)
+    last_partial_update = 0
+    PARTIAL_THROTTLE_MS = 500  # Only update partial every 500ms
 
     # Deepgram WS
     headers = [f"Authorization: Token {Config.DEEPGRAM_API_KEY}"]
@@ -171,7 +175,7 @@ def transcription_stream(ws):
     sender_thread = threading.Thread(target=sender, daemon=True)
     sender_thread.start()
 
-    runner_thread = threading.Thread(target=dg_ws.run_forever, daemon=True)
+    runner_thread = threading.Thread(target=lambda: dg_ws.run_forever(ping_interval=20, ping_timeout=20), daemon=True)
     runner_thread.start()
 
     try:
@@ -250,23 +254,32 @@ def transcription_stream(ws):
                     except Exception as e:
                         logger.error(f"FINAL update error: {e}")
                 else:
-                    # Append to PARTIAL
-                    try:
-                        sel = _supa.table("twilio_call")\
-                            .select("live_transcript_partial")\
-                            .eq("call_sid", call_sid).single().execute()
-                        existing = ""
-                        if getattr(sel, "data", None):
-                            existing = sel.data.get("live_transcript_partial") or ""
-                        new_partial = (existing + ("\n" if existing else "") + line).strip()
-                        _supa.table("twilio_call").update({
-                            "live_transcript_partial": new_partial
-                        }).eq("call_sid", call_sid).execute()
-                    except Exception as e:
-                        logger.error(f"PARTIAL update error: {e}")
+                    # Append to PARTIAL (with throttling)
+                    import time
+                    current_time = time.time() * 1000  # Convert to milliseconds
+                    if current_time - last_partial_update >= PARTIAL_THROTTLE_MS:
+                        try:
+                            sel = _supa.table("twilio_call")\
+                                .select("live_transcript_partial")\
+                                .eq("call_sid", call_sid).single().execute()
+                            existing = ""
+                            if getattr(sel, "data", None):
+                                existing = sel.data.get("live_transcript_partial") or ""
+                            new_partial = (existing + ("\n" if existing else "") + line).strip()
+                            _supa.table("twilio_call").update({
+                                "live_transcript_partial": new_partial
+                            }).eq("call_sid", call_sid).execute()
+                            last_partial_update = current_time
+                        except Exception as e:
+                            logger.error(f"PARTIAL update error: {e}")
 
     finally:
         try:
             audio_queue.append(None)
+        except Exception:
+            pass
+        try:
+            # politely tell DG we're done
+            dg_ws.close()
         except Exception:
             pass
