@@ -80,61 +80,63 @@ def transcription_stream(ws):
     # Simple queue for audio chunks
     audio_queue = []
     events_queue = []
+    current_track = "unknown"  # Track the current audio track
 
     def deepgram_pump():
-        headers = {"Authorization": f"Token {Config.DEEPGRAM_API_KEY}"}
+        # FIX 1: headers must be a list of "Key: Value" strings
+        headers = [f"Authorization: Token {Config.DEEPGRAM_API_KEY}"]
         logger.info("=== DEEPGRAM WEBSOCKET SETUP ===")
         logger.info(f"URL: {DEEPGRAM_WSS}")
         logger.info(f"Headers: {headers}")
         logger.info("=== END DEEPGRAM SETUP ===")
-        
+
+        ws_open = threading.Event()
+
         def on_message(ws, message):
             try:
                 data = orjson.loads(message)
                 events_queue.append(data)
-                logger.info(f"=== DEEPGRAM MESSAGE RECEIVED ===")
-                logger.info(f"Message type: {type(data)}")
+                logger.info("=== DEEPGRAM MESSAGE RECEIVED ===")
                 logger.info(f"Message keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
-                logger.info(f"Full message: {data}")
                 logger.info("=== END DEEPGRAM MESSAGE ===")
             except Exception as e:
-                logger.error(f"=== DEEPGRAM MESSAGE ERROR ===")
+                logger.error("=== DEEPGRAM MESSAGE ERROR ===")
                 logger.error(f"Error parsing Deepgram message: {e}")
-                logger.error(f"Raw message: {message}")
                 logger.error("=== END DEEPGRAM MESSAGE ERROR ===")
-        
+
         def on_error(ws, error):
-            logger.error(f"=== DEEPGRAM WEBSOCKET ERROR ===")
+            logger.error("=== DEEPGRAM WEBSOCKET ERROR ===")
             logger.error(f"Error: {error}")
-            logger.error(f"Error type: {type(error)}")
             logger.error("=== END DEEPGRAM WEBSOCKET ERROR ===")
-        
+
         def on_close(ws, close_status_code, close_msg):
-            logger.info(f"=== DEEPGRAM WEBSOCKET CLOSED ===")
+            logger.info("=== DEEPGRAM WEBSOCKET CLOSED ===")
             logger.info(f"Close status code: {close_status_code}")
             logger.info(f"Close message: {close_msg}")
             logger.info("=== END DEEPGRAM WEBSOCKET CLOSED ===")
-        
+
         def on_open(ws):
             logger.info("=== DEEPGRAM WEBSOCKET OPENED ===")
-            logger.info("Deepgram WebSocket connection opened and ready")
+            ws_open.set()
             logger.info("=== END DEEPGRAM WEBSOCKET OPENED ===")
-        
+
         dg_ws = websocket.WebSocketApp(
             DEEPGRAM_WSS,
-            header=headers,
+            header=headers,              # <-- list, not dict
             on_open=on_open,
             on_message=on_message,
             on_error=on_error,
             on_close=on_close
         )
-        
+
         def sender():
+            logger.info("=== AUDIO SENDER STARTED ===")
+            # FIX 2: wait until on_open fired
+            if not ws_open.wait(timeout=5):
+                logger.error("Deepgram WS did not open within 5s; stopping sender")
+                return
+
             chunk_count = 0
-            logger.info(f"=== AUDIO SENDER STARTED ===")
-            logger.info(f"Audio queue initial size: {len(audio_queue)}")
-            logger.info("=== END AUDIO SENDER STARTED ===")
-            
             while True:
                 if audio_queue:
                     chunk = audio_queue.pop(0)
@@ -198,13 +200,15 @@ def transcription_stream(ws):
 
             elif etype == "media":
                 payload_b64 = evt.get("media", {}).get("payload")
+                track = evt.get("media", {}).get("track")  # "inbound" or "outbound"
+                current_track = track  # Update current track
                 if payload_b64:
                     audio_bytes = base64.b64decode(payload_b64)
                     audio_queue.append(audio_bytes)
                     logger.info(f"=== AUDIO CHUNK RECEIVED ===")
                     logger.info(f"CallSid: {call_sid}")
+                    logger.info(f"Track: {track}")
                     logger.info(f"Audio chunk size: {len(audio_bytes)} bytes")
-                    logger.info(f"Media event: {evt}")
                     logger.info("=== END AUDIO CHUNK ===")
                 else:
                     logger.warning("Media event without payload")
@@ -231,7 +235,7 @@ def transcription_stream(ws):
                     logger.debug(f"Skipping Deepgram message - no channel_texts or call_sid")
                     continue
 
-                line = " ".join([f"[ch{ch}] {txt}" for ch, txt in channel_texts if txt]).strip()
+                line = " ".join([f"[{current_track} ch{ch}] {txt}" for ch, txt in channel_texts if txt]).strip()
                 if not line:
                     logger.debug(f"Skipping Deepgram message - empty line")
                     continue
