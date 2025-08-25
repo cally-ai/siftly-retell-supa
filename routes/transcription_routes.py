@@ -155,16 +155,7 @@ def transcription_stream(ws):
                 logger.info(f"CallSid: {call_sid}")
                 logger.info(f"Full start event: {evt}")
                 logger.info("=== END MEDIA STREAM START ===")
-                if call_sid:
-                    try:
-                        supabase.table("twilio_call").upsert({
-                            "call_sid": call_sid,
-                            "live_transcript_partial": "",
-                            "live_transcript_final": ""
-                        }).execute()
-                        logger.info(f"Successfully created/updated twilio_call record for {call_sid}")
-                    except Exception as e:
-                        logger.error(f"Failed to create twilio_call record: {e}")
+                # Note: twilio_call record will be created by call_started webhook with correct CallSid
 
             elif etype == "media":
                 payload_b64 = evt.get("media", {}).get("payload")

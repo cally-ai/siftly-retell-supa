@@ -191,12 +191,73 @@ class VoiceWebhookService:
             dynamic_variables['call_type'] = 'inbound'
             dynamic_variables['source'] = 'twilio_webhook'
 
+            # Create retell_event record and get caller_id for the call_started webhook
+            retell_event_data = {
+                'from_number': from_number,
+                'to_number': to_number,
+                'agent_id': 'pending',  # Will be updated by call_started webhook
+                'call_status': 'inbound',  # Initial status
+                'direction': 'inbound'
+            }
+            
+            retell_response = self.get_supabase_client().table('retell_event').insert(retell_event_data).execute()
+            if hasattr(retell_response, 'error') and retell_response.error:
+                logger.error(f"Error creating retell_event record: {retell_response.error}")
+                return self._get_default_dynamic_variables(from_number, to_number)
+            
+            retell_event_id = retell_response.data[0]['id'] if retell_response.data else None
+            logger.info(f"Created retell_event record with ID: {retell_event_id}")
+            
+            # Get or create caller record
+            caller_id = self._get_or_create_caller(from_number)
+            if not caller_id:
+                logger.error(f"Failed to get or create caller for: {from_number}")
+                return self._get_default_dynamic_variables(from_number, to_number)
+            
+            # Add retell_event_id and caller_id to dynamic variables
+            dynamic_variables['retell_event_id'] = retell_event_id
+            dynamic_variables['caller_id'] = caller_id
+
             logger.info(f"Dynamic variables built successfully: {list(dynamic_variables.keys())}")
             return dynamic_variables
 
         except Exception as e:
             logger.error(f"Error getting dynamic variables: {e}")
             return self._get_default_dynamic_variables(from_number, to_number)
+
+    def _get_or_create_caller(self, from_number: str) -> Optional[str]:
+        """
+        Get or create caller record in Supabase
+        """
+        try:
+            # Check if caller already exists
+            caller_resp = self.get_supabase_client().table('caller').select('id').eq('phone_number', from_number).limit(1).execute()
+            
+            if caller_resp.data:
+                caller_id = caller_resp.data[0].get('id')
+                logger.info(f"Found existing caller with ID: {caller_id}")
+                return caller_id
+            
+            # Create new caller record
+            caller_data = {
+                'phone_number': from_number,
+                'name': f"Caller from {from_number}",
+                'email': None,
+                'address': None
+            }
+            
+            new_caller_resp = self.get_supabase_client().table('caller').insert(caller_data).execute()
+            if hasattr(new_caller_resp, 'error') and new_caller_resp.error:
+                logger.error(f"Error creating caller record: {new_caller_resp.error}")
+                return None
+            
+            new_caller_id = new_caller_resp.data[0]['id'] if new_caller_resp.data else None
+            logger.info(f"Created new caller with ID: {new_caller_id}")
+            return new_caller_id
+            
+        except Exception as e:
+            logger.error(f"Error in _get_or_create_caller: {e}")
+            return None
 
     def _get_default_dynamic_variables(self, from_number: str, to_number: str) -> Dict[str, Any]:
         """
