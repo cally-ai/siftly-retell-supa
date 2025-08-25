@@ -90,17 +90,37 @@ class VoiceWebhookService:
         Register phone call with Retell AI and return call_id
         """
         try:
+            # Prepare request payload
+            payload = {
+                "agent_id": agent_id,
+                "from_number": from_number,
+                "to_number": to_number,
+                "direction": "inbound",
+            }
+            
+            headers = {"Authorization": f"Bearer {self.retell_api_key}"}
+            
+            # Log the request details
+            logger.info("=== RETELL API REGISTRATION REQUEST ===")
+            logger.info(f"URL: https://api.retellai.com/v2/register-phone-call")
+            logger.info(f"Headers: {headers}")
+            logger.info(f"Payload: {payload}")
+            logger.info("=== END RETELL API REQUEST ===")
+            
             resp = requests.post(
                 "https://api.retellai.com/v2/register-phone-call",
-                json={
-                    "agent_id": agent_id,
-                    "from_number": from_number,
-                    "to_number": to_number,
-                    "direction": "inbound",
-                },
-                headers={"Authorization": f"Bearer {self.retell_api_key}"},
+                json=payload,
+                headers=headers,
                 timeout=30,
             )
+            
+            # Log the response
+            logger.info("=== RETELL API RESPONSE ===")
+            logger.info(f"Status Code: {resp.status_code}")
+            logger.info(f"Response Headers: {dict(resp.headers)}")
+            logger.info(f"Response Body: {resp.text}")
+            logger.info("=== END RETELL API RESPONSE ===")
+            
             if resp.status_code not in (200, 201):
                 logger.error(f"Retell API error: {resp.status_code} - {resp.text}")
                 return None
@@ -110,7 +130,7 @@ class VoiceWebhookService:
                 logger.error("No call_id returned from Retell API")
                 return None
 
-            logger.info(f"Registered Retell call_id={call_id}")
+            logger.info(f"Successfully registered Retell call_id={call_id}")
             return call_id
 
         except requests.exceptions.RequestException as e:
@@ -197,7 +217,11 @@ def voice_webhook():
 
         # 3) Return TwiML: Start Media Stream (stereo) + Dial Retell
         twiml_response = voice_service.generate_twiml_response(call_id)
-        logger.info(f"Returning TwiML for CallSid={call_sid}, Retell call_id={call_id}")
+        logger.info("=== TWIML RESPONSE ===")
+        logger.info(f"CallSid: {call_sid}")
+        logger.info(f"Retell call_id: {call_id}")
+        logger.info(f"TwiML Content: {twiml_response}")
+        logger.info("=== END TWIML RESPONSE ===")
         return Response(twiml_response, mimetype="text/xml")
 
     except Exception as e:
