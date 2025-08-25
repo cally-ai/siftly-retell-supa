@@ -214,10 +214,28 @@ class VoiceWebhookService:
                 logger.error(f"Failed to get or create caller for: {from_number}")
                 return self._get_default_dynamic_variables(from_number, to_number, original_call_sid)
             
-            # Add retell_event_id, caller_id, and original_call_sid to dynamic variables
+            # Create original twilio_call record (Media Stream CallSid) for transcription
+            original_twilio_call_data = {
+                'call_sid': original_call_sid,  # Media Stream CallSid
+                'from_number': from_number,
+                'to_number': to_number,
+                'direction': 'inbound',
+                'retell_event_id': retell_event_id,
+                'caller_id': caller_id
+            }
+            
+            original_twilio_response = self.get_supabase_client().table('twilio_call').insert(original_twilio_call_data).execute()
+            if hasattr(original_twilio_response, 'error') and original_twilio_response.error:
+                logger.error(f"Error creating original twilio_call record: {original_twilio_response.error}")
+            else:
+                original_twilio_call_id = original_twilio_response.data[0]['id'] if original_twilio_response.data else None
+                logger.info(f"Created original twilio_call record with ID: {original_twilio_call_id} for Media Stream CallSid: {original_call_sid}")
+            
+            # Add retell_event_id, caller_id, original_call_sid, and original_twilio_call_id to dynamic variables
             dynamic_variables['retell_event_id'] = retell_event_id
             dynamic_variables['caller_id'] = caller_id
             dynamic_variables['original_call_sid'] = original_call_sid  # Media Stream CallSid
+            dynamic_variables['original_twilio_call_id'] = original_twilio_call_id  # ID of the original record
 
             logger.info(f"Dynamic variables built successfully: {list(dynamic_variables.keys())}")
             return dynamic_variables

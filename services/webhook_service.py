@@ -773,10 +773,11 @@ class WebhookService:
             # Extract dynamic variables if present
             retell_llm_dynamic_variables = call_data.get('retell_llm_dynamic_variables', {})
             
-            # Get retell_event_id, caller_id, and original_call_sid from dynamic variables
+            # Get retell_event_id, caller_id, original_call_sid, and original_twilio_call_id from dynamic variables
             retell_event_id = retell_llm_dynamic_variables.get('retell_event_id')
             caller_id = retell_llm_dynamic_variables.get('caller_id')
             original_call_sid = retell_llm_dynamic_variables.get('original_call_sid')  # Media Stream CallSid
+            original_twilio_call_id = retell_llm_dynamic_variables.get('original_twilio_call_id')  # ID of original record
             
             logger.info(f"Updating retell_event for call_started event - Call ID: {call_id}, Retell Event ID: {retell_event_id}, Twilio SID: {twilio_call_sid}, Original CallSid: {original_call_sid}")
             
@@ -801,29 +802,32 @@ class WebhookService:
             
             logger.info(f"Updated retell_event record with ID: {retell_event_id}")
             
-            # 2. Create twilio_call record (if we have a Twilio call SID)
-            if original_call_sid and caller_id:
-                # Use the original_call_sid (Media Stream CallSid) for the database record
-                # This ensures transcription can find the correct record
-                twilio_call_data = {
-                    'call_sid': original_call_sid,  # Media Stream CallSid
+            # 2. Create Retell bridge twilio_call record (SIP CallSid) and link to original record
+            if twilio_call_sid and caller_id and original_twilio_call_id:
+                # Create record with SIP CallSid and link to original record
+                retell_bridge_twilio_call_data = {
+                    'call_sid': twilio_call_sid,  # SIP CallSid from Retell
                     'from_number': from_number,
                     'to_number': to_number,
                     'direction': direction,
                     'retell_event_id': retell_event_id,  # Link to retell_event
-                    'caller_id': caller_id  # Link to caller
+                    'caller_id': caller_id,  # Link to caller
+                    'original_twilio_call_id': original_twilio_call_id  # Link to original record
                 }
                 
-                twilio_response = self.supabase.table('twilio_call').insert(twilio_call_data).execute()
-                if hasattr(twilio_response, 'error') and twilio_response.error:
-                    logger.error(f"Error creating twilio_call record: {twilio_response.error}")
+                retell_bridge_response = self.supabase.table('twilio_call').insert(retell_bridge_twilio_call_data).execute()
+                if hasattr(retell_bridge_response, 'error') and retell_bridge_response.error:
+                    logger.error(f"Error creating Retell bridge twilio_call record: {retell_bridge_response.error}")
                 else:
-                    logger.info(f"Created twilio_call record with ID: {twilio_response.data[0]['id'] if twilio_response.data else 'unknown'}")
+                    retell_bridge_id = retell_bridge_response.data[0]['id'] if retell_bridge_response.data else None
+                    logger.info(f"Created Retell bridge twilio_call record with ID: {retell_bridge_id} for SIP CallSid: {twilio_call_sid}, linked to original record: {original_twilio_call_id}")
             else:
-                if not original_call_sid:
-                    logger.warning("No original_call_sid found in dynamic variables, skipping twilio_call record creation")
+                if not twilio_call_sid:
+                    logger.warning("No twilio_call_sid found in telephony_identifier, skipping Retell bridge record creation")
                 if not caller_id:
-                    logger.warning("No caller_id found in dynamic variables, skipping twilio_call record creation")
+                    logger.warning("No caller_id found in dynamic variables, skipping Retell bridge record creation")
+                if not original_twilio_call_id:
+                    logger.warning("No original_twilio_call_id found in dynamic variables, skipping Retell bridge record creation")
                 
         except Exception as e:
             logger.error(f"Error handling call_started event: {e}")
