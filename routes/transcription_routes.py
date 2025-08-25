@@ -21,7 +21,7 @@ sock = Sock()  # IMPORTANT: call sock.init_app(app) in your app factory / main
 
 DEEPGRAM_WSS = (
     "wss://api.deepgram.com/v1/listen"
-    "?encoding=mulaw&sample_rate=8000&channels=2&multichannel=true"
+    "?encoding=mulaw&sample_rate=8000&channels=1&multichannel=false"
     "&punctuate=true&endpointing=50"
 )
 
