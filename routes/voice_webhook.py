@@ -28,8 +28,8 @@ class VoiceWebhookService:
         # PUBLIC_HOSTNAME is used to build the wss URL Twilio streams to
         self.public_hostname = getattr(Config, "PUBLIC_HOSTNAME", None)
         if not self.public_hostname:
-            logger.error("PUBLIC_HOSTNAME not configured")
-            raise ValueError("PUBLIC_HOSTNAME environment variable is required")
+            logger.warning("PUBLIC_HOSTNAME not configured - will use default")
+            self.public_hostname = "https://siftly.onrender.com"  # Default fallback
 
     def get_supabase_client(self) -> Client:
         """Get Supabase client using your existing pattern"""

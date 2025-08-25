@@ -1,0 +1,5 @@
+[33mbaaf7da[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Fix websocket dependency conflict with Supabase
+[33m3638c26[m Fix websockets version conflict
+[33me14cdda[m Add transcription WebSocket for Twilio Media Streams
+[33mfbdc7fb[m Fix column names to lowercase with underscores
+[33mdd68ced[m Add twilio_call row creation and source param to WS

@@ -39,6 +39,9 @@ class Config:
     # Voice Webhook Configuration
     PUBLIC_HOSTNAME = os.getenv('PUBLIC_HOSTNAME')
     
+    # Deepgram Configuration
+    DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
+    
     # Twilio Configuration
     TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
     TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')

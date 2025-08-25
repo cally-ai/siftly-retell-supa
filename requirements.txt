@@ -1,6 +1,9 @@
 Flask==3.0.0
 python-dotenv==1.0.0
 requests==2.31.0
+flask-sock==0.7.0
+websocket-client==1.6.4
+orjson==3.9.10
 gunicorn==21.2.0
 
 openai>=1.0.0

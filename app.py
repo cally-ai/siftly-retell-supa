@@ -10,6 +10,7 @@ from routes.health_routes import health_bp
 from routes.webhook_routes import webhook_bp
 from routes.typeform import typeform_bp
 from routes.voice_webhook import voice_bp
+from routes.transcription_routes import transcription_bp, sock
 
 # TODO: Implement these routes
 # from routes.vapi_routes import vapi_bp
@@ -39,6 +40,9 @@ def create_app(config_name=None):
     # Create Flask app
     app = Flask(__name__)
     
+    # Initialize Flask-Sock for WebSocket support
+    sock.init_app(app)
+    
     # Setup logging
     logger = setup_logger(__name__)
     
@@ -60,6 +64,7 @@ def create_app(config_name=None):
     app.register_blueprint(webhook_bp)
     app.register_blueprint(typeform_bp)
     app.register_blueprint(voice_bp)  # Exposes /voice-webhook
+    app.register_blueprint(transcription_bp)  # Exposes /transcription/stream WebSocket
 
     # TODO: Register these when implemented
     # app.register_blueprint(vapi_bp)
