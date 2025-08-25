@@ -92,9 +92,16 @@ def transcription_stream(ws):
             try:
                 data = orjson.loads(message)
                 events_queue.append(data)
-                logger.debug(f"Received Deepgram message: {data}")
+                logger.info(f"=== DEEPGRAM MESSAGE RECEIVED ===")
+                logger.info(f"Message type: {type(data)}")
+                logger.info(f"Message keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                logger.info(f"Full message: {data}")
+                logger.info("=== END DEEPGRAM MESSAGE ===")
             except Exception as e:
+                logger.error(f"=== DEEPGRAM MESSAGE ERROR ===")
                 logger.error(f"Error parsing Deepgram message: {e}")
+                logger.error(f"Raw message: {message}")
+                logger.error("=== END DEEPGRAM MESSAGE ERROR ===")
         
         def on_error(ws, error):
             logger.error(f"Deepgram WebSocket error: {error}")
@@ -115,14 +122,28 @@ def transcription_stream(ws):
         )
         
         def sender():
+            chunk_count = 0
             while True:
                 if audio_queue:
                     chunk = audio_queue.pop(0)
                     if chunk is None:
+                        logger.info(f"=== AUDIO SENDER STOPPING ===")
+                        logger.info(f"Total chunks sent to Deepgram: {chunk_count}")
+                        logger.info("=== END AUDIO SENDER ===")
                         break
                     try:
                         dg_ws.send(chunk, websocket.ABNF.OPCODE_BINARY)
-                    except Exception:
+                        chunk_count += 1
+                        if chunk_count % 100 == 0:  # Log every 100 chunks
+                            logger.info(f"=== AUDIO SENDER PROGRESS ===")
+                            logger.info(f"Chunks sent to Deepgram: {chunk_count}")
+                            logger.info(f"Chunk size: {len(chunk)} bytes")
+                            logger.info("=== END AUDIO SENDER PROGRESS ===")
+                    except Exception as e:
+                        logger.error(f"=== AUDIO SENDER ERROR ===")
+                        logger.error(f"Error sending chunk to Deepgram: {e}")
+                        logger.error(f"Chunk count: {chunk_count}")
+                        logger.error("=== END AUDIO SENDER ERROR ===")
                         break
                 else:
                     import time
