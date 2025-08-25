@@ -29,7 +29,10 @@ class VoiceWebhookService:
         self.public_hostname = getattr(Config, "PUBLIC_HOSTNAME", None)
         if not self.public_hostname:
             logger.warning("PUBLIC_HOSTNAME not configured - will use default")
-            self.public_hostname = "https://siftly.onrender.com"  # Default fallback
+            self.public_hostname = "siftly-retell-supa.onrender.com"  # Default fallback
+        else:
+            # Remove protocol if present
+            self.public_hostname = self.public_hostname.replace("https://", "").replace("http://", "")
 
     def get_supabase_client(self) -> Client:
         """Get Supabase client using your existing pattern"""
@@ -96,6 +99,12 @@ class VoiceWebhookService:
                 "from_number": from_number,
                 "to_number": to_number,
                 "direction": "inbound",
+                "metadata": {
+                    "caller_id": from_number,
+                    "callee_id": to_number,
+                    "call_type": "inbound",
+                    "source": "twilio_webhook"
+                }
             }
             
             headers = {"Authorization": f"Bearer {self.retell_api_key}"}
