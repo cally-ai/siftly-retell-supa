@@ -175,7 +175,10 @@ def transcription_stream(ws):
     sender_thread = threading.Thread(target=sender, daemon=True)
     sender_thread.start()
 
-    runner_thread = threading.Thread(target=lambda: dg_ws.run_forever(ping_interval=20, ping_timeout=20), daemon=True)
+    runner_thread = threading.Thread(
+        target=lambda: dg_ws.run_forever(ping_interval=30, ping_timeout=10),
+        daemon=True
+    )
     runner_thread.start()
 
     try:
@@ -203,13 +206,8 @@ def transcription_stream(ws):
                 logger.info(f"Start: callSid={call_sid}, tracks={tracks}, mediaFormat={mf}")
 
                 # Trust Twilio 'media.track' per-media; fall back to URL hint for labeling
-                # Ensure the DB row exists
-                if call_sid:
-                    _supa.table("twilio_call").upsert({
-                        "call_sid": call_sid,
-                        "live_transcript_partial": "",
-                        "live_transcript_final": ""
-                    }).execute()
+                # REMOVE the upsert/insert here to avoid duplicate-key races
+                # The row is already created in /voice-webhook
 
             elif etype == "media":
                 track = evt.get("media", {}).get("track")  # 'inbound' or 'outbound'
@@ -256,8 +254,11 @@ def transcription_stream(ws):
                 else:
                     # Append to PARTIAL (with throttling)
                     import time
+                    import random
                     current_time = time.time() * 1000  # Convert to milliseconds
                     if current_time - last_partial_update >= PARTIAL_THROTTLE_MS:
+                        # Small random jitter to reduce DB write collisions
+                        time.sleep(random.uniform(0, 0.05))
                         try:
                             sel = _supa.table("twilio_call")\
                                 .select("live_transcript_partial")\
