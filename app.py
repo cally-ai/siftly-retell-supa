@@ -17,7 +17,7 @@ from routes.transcription_routes import transcription_bp, sock
 # from routes.ivr_routes import ivr_bp
 from routes.classify_intent import classify_bp
 
-# Version check for debugging
+# Version check for debugging (test change)
 try:
     from openai import OpenAI
     import openai
