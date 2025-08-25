@@ -413,7 +413,7 @@ def voice_webhook():
         # 3) Return TwiML: Start Media Stream (stereo) + Dial Retell
         twiml_response = voice_service.generate_twiml_response(call_id)
         logger.info("=== TWIML RESPONSE ===")
-        logger.info(f"CallSid: {call_sid}")
+        logger.info(f"CallSid: {original_call_sid}")
         logger.info(f"Retell call_id: {call_id}")
         logger.info(f"TwiML Content: {twiml_response}")
         logger.info("=== END TWIML RESPONSE ===")
