@@ -371,9 +371,9 @@ class VoiceWebhookService:
             )
             vr.append(start_in)
 
-            # 2) Bridge to Retell
-            dial = Dial()
-            sip_url = f"sip:{call_id}@5t4n6j0wnrl.sip.livekit.cloud"
+            # 2) Bridge to Retell — key flags here:
+            dial = Dial(answer_on_bridge=True)  # <-- prevents early-media weirdness
+            sip_url = f"sip:{call_id}@5t4n6j0wnrl.sip.livekit.cloud;transport=tls"  # <-- prefer TLS/SRTP
             dial.sip(sip_url)
 
             # 3) Agent leg (outbound) INSIDE <Dial> AFTER <Sip>
