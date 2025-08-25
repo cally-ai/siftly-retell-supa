@@ -94,7 +94,7 @@ class VoiceWebhookService:
             logger.error(f"Supabase lookup error: {e}")
             return None
 
-    def _get_dynamic_variables_from_supabase(self, to_number: str, from_number: str) -> Dict[str, Any]:
+    def _get_dynamic_variables_from_supabase(self, to_number: str, from_number: str, original_call_sid: str) -> Dict[str, Any]:
         """
         Get dynamic variables using the same chain as call_inbound webhook
         """
@@ -112,13 +112,13 @@ class VoiceWebhookService:
                 tw_resp = self.get_supabase_client().table('twilio_number').select('client_id, client_ivr_language_configuration_id').eq('twilio_number', to_number).limit(1).execute()
             if not tw_resp.data:
                 logger.warning(f"No twilio_number record found for: {to_number} (cleaned: {cleaned_number})")
-                return self._get_default_dynamic_variables(from_number, to_number)
+                return self._get_default_dynamic_variables(from_number, to_number, original_call_sid)
             
             client_id = tw_resp.data[0].get('client_id')
             client_ivr_language_configuration_id = tw_resp.data[0].get('client_ivr_language_configuration_id')
             if not client_id:
                 logger.warning(f"twilio_number {to_number} has no client_id")
-                return self._get_default_dynamic_variables(from_number, to_number)
+                return self._get_default_dynamic_variables(from_number, to_number, original_call_sid)
 
             # Step 2: Get client information and configuration
             dynamic_variables: Dict[str, Any] = {}
@@ -203,7 +203,7 @@ class VoiceWebhookService:
             retell_response = self.get_supabase_client().table('retell_event').insert(retell_event_data).execute()
             if hasattr(retell_response, 'error') and retell_response.error:
                 logger.error(f"Error creating retell_event record: {retell_response.error}")
-                return self._get_default_dynamic_variables(from_number, to_number)
+                return self._get_default_dynamic_variables(from_number, to_number, original_call_sid)
             
             retell_event_id = retell_response.data[0]['id'] if retell_response.data else None
             logger.info(f"Created retell_event record with ID: {retell_event_id}")
@@ -212,7 +212,7 @@ class VoiceWebhookService:
             caller_id = self._get_or_create_caller(from_number)
             if not caller_id:
                 logger.error(f"Failed to get or create caller for: {from_number}")
-                return self._get_default_dynamic_variables(from_number, to_number)
+                return self._get_default_dynamic_variables(from_number, to_number, original_call_sid)
             
             # Add retell_event_id, caller_id, and original_call_sid to dynamic variables
             dynamic_variables['retell_event_id'] = retell_event_id
@@ -224,7 +224,7 @@ class VoiceWebhookService:
 
         except Exception as e:
             logger.error(f"Error getting dynamic variables: {e}")
-            return self._get_default_dynamic_variables(from_number, to_number)
+            return self._get_default_dynamic_variables(from_number, to_number, original_call_sid)
 
     def _get_or_create_caller(self, from_number: str) -> Optional[str]:
         """
@@ -260,7 +260,7 @@ class VoiceWebhookService:
             logger.error(f"Error in _get_or_create_caller: {e}")
             return None
 
-    def _get_default_dynamic_variables(self, from_number: str, to_number: str) -> Dict[str, Any]:
+    def _get_default_dynamic_variables(self, from_number: str, to_number: str, original_call_sid: str) -> Dict[str, Any]:
         """
         Get default dynamic variables when customer lookup fails
         """
@@ -273,16 +273,17 @@ class VoiceWebhookService:
             'caller_number': from_number,
             'callee_number': to_number,
             'call_type': 'inbound',
-            'source': 'twilio_webhook'
+            'source': 'twilio_webhook',
+            'original_call_sid': original_call_sid
         }
 
-    def register_phone_call_with_retell(self, agent_id: str, from_number: str, to_number: str) -> Optional[str]:
+    def register_phone_call_with_retell(self, agent_id: str, from_number: str, to_number: str, original_call_sid: str) -> Optional[str]:
         """
         Register phone call with Retell AI and return call_id
         """
         try:
             # Get dynamic variables using the same chain as call_inbound webhook
-            dynamic_variables = self._get_dynamic_variables_from_supabase(to_number, from_number)
+            dynamic_variables = self._get_dynamic_variables_from_supabase(to_number, from_number, original_call_sid)
             
             # Prepare request payload
             payload = {
@@ -401,7 +402,7 @@ def voice_webhook():
             )
 
         # 2) Register call with Retell (returns call_id)
-        call_id = voice_service.register_phone_call_with_retell(agent_id, from_number, to_number)
+        call_id = voice_service.register_phone_call_with_retell(agent_id, from_number, to_number, original_call_sid)
         if not call_id:
             logger.error("Failed to register call with Retell")
             return Response(
