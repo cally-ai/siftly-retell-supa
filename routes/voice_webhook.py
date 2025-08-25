@@ -363,25 +363,27 @@ class VoiceWebhookService:
         try:
             vr = VoiceResponse()
 
-            # 1) Start Media Stream for INBOUND (caller)
+            # 1) Caller leg (inbound) BEFORE the bridge
             start_in = Start()
             start_in.stream(
-                url=f"wss://{self.public_hostname}/transcription/stream?track=inbound"
+                url=f"wss://{self.public_hostname}/transcription/stream?track=inbound",
+                track="inbound_track"   # <-- REQUIRED
             )
             vr.append(start_in)
 
-            # 2) Dial Retell
+            # 2) Bridge to Retell
             dial = Dial()
+            sip_url = f"sip:{call_id}@5t4n6j0wnrl.sip.livekit.cloud"
+            dial.sip(sip_url)
 
-            # 3) Start Media Stream for OUTBOUND (dialed party / agent)
+            # 3) Agent leg (outbound) INSIDE <Dial> AFTER <Sip>
             start_out = Start()
             start_out.stream(
-                url=f"wss://{self.public_hostname}/transcription/stream?track=outbound"
+                url=f"wss://{self.public_hostname}/transcription/stream?track=outbound",
+                track="outbound_track"  # <-- REQUIRED
             )
             dial.append(start_out)
 
-            sip_url = f"sip:{call_id}@5t4n6j0wnrl.sip.livekit.cloud"
-            dial.sip(sip_url)
             logger.info(f"Dialing Retell SIP: {sip_url}")
             vr.append(dial)
 
