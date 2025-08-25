@@ -3,7 +3,7 @@ Voice webhook route handlers for Twilio integration with Retell AI + Media Strea
 """
 import os
 import requests
-from typing import Optional
+from typing import Optional, Dict, Any
 from flask import Blueprint, request, Response
 from twilio.twiml.voice_response import VoiceResponse, Dial, Start
 from config import Config
@@ -94,23 +94,141 @@ class VoiceWebhookService:
             logger.error(f"Supabase lookup error: {e}")
             return None
 
+    def _get_dynamic_variables_from_supabase(self, to_number: str, from_number: str) -> Dict[str, Any]:
+        """
+        Get dynamic variables using the same chain as call_inbound webhook
+        """
+        try:
+            logger.info(f"Getting dynamic variables for to_number: {to_number}, from_number: {from_number}")
+            
+            # Clean phone number by removing spaces and special characters
+            cleaned_number = to_number.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+            logger.info(f"Original number: {to_number}, Cleaned number: {cleaned_number}")
+            
+            # Step 1: Find client via twilio_number (try both original and cleaned)
+            tw_resp = self.get_supabase_client().table('twilio_number').select('client_id, client_ivr_language_configuration_id').eq('twilio_number', cleaned_number).limit(1).execute()
+            if not tw_resp.data:
+                # Fallback to original number if cleaned doesn't work
+                tw_resp = self.get_supabase_client().table('twilio_number').select('client_id, client_ivr_language_configuration_id').eq('twilio_number', to_number).limit(1).execute()
+            if not tw_resp.data:
+                logger.warning(f"No twilio_number record found for: {to_number} (cleaned: {cleaned_number})")
+                return self._get_default_dynamic_variables(from_number, to_number)
+            
+            client_id = tw_resp.data[0].get('client_id')
+            client_ivr_language_configuration_id = tw_resp.data[0].get('client_ivr_language_configuration_id')
+            if not client_id:
+                logger.warning(f"twilio_number {to_number} has no client_id")
+                return self._get_default_dynamic_variables(from_number, to_number)
+
+            # Step 2: Get client information and configuration
+            dynamic_variables: Dict[str, Any] = {}
+            
+            # Get client basic info
+            client_resp = self.get_supabase_client().table('client').select('name, client_description').eq('id', client_id).limit(1).execute()
+            if client_resp.data:
+                client = client_resp.data[0]
+                client_name = client.get('name', 'Our Company')
+                client_description = client.get('client_description', '')
+                dynamic_variables['client_id'] = client_id
+                dynamic_variables['client_name'] = client_name
+                dynamic_variables['client_description'] = client_description
+                logger.info(f"Client data - client_id: '{client_id}', name: '{client_name}', description: '{client_description}'")
+
+            # Get client workflow configuration
+            wf_resp = self.get_supabase_client().table('client_workflow_configuration').select('*').eq('client_id', client_id).limit(1).execute()
+            if wf_resp.data:
+                wf_config = wf_resp.data[0]
+                logger.info(f"Workflow config raw data: {wf_config}")
+                # Add workflow configuration as dynamic variables (without workflow_ prefix)
+                for key, value in wf_config.items():
+                    if key != 'id' and key != 'client_id' and value is not None:
+                        dynamic_variables[key] = value
+                        logger.info(f"Added {key}: '{value}'")
+
+            # Get client language agent names using the new structure
+            if client_ivr_language_configuration_id:
+                # Get all languages for this client's IVR configuration
+                ivr_lang_resp = self.get_supabase_client().table('client_ivr_language_configuration_language').select(
+                    'language_id'
+                ).eq('client_id', client_id).eq('client_ivr_language_configuration_id', client_ivr_language_configuration_id).execute()
+                
+                if ivr_lang_resp.data:
+                    # Get agent names for each language
+                    for lang_record in ivr_lang_resp.data:
+                        language_id = lang_record.get('language_id')
+                        if language_id:
+                            # Get agent name for this language
+                            agent_resp = self.get_supabase_client().table('client_language_agent_name').select(
+                                'agent_name'
+                            ).eq('client_id', client_id).eq('language_id', language_id).limit(1).execute()
+                            
+                            if agent_resp.data:
+                                agent_name = agent_resp.data[0].get('agent_name')
+                                if agent_name:
+                                    # Get language code for the key
+                                    lang_resp = self.get_supabase_client().table('language').select('language_code').eq('id', language_id).limit(1).execute()
+                                    if lang_resp.data:
+                                        lang_code = lang_resp.data[0].get('language_code', 'en')
+                                        dynamic_variables[f'agent_name_{lang_code}'] = agent_name
+                                        logger.info(f"Added agent_name_{lang_code}: {agent_name}")
+            else:
+                # Fallback: Get all agent names for the client (old method)
+                agent_names_resp = self.get_supabase_client().table('client_language_agent_name').select('language_id, agent_name').eq('client_id', client_id).execute()
+                if agent_names_resp.data:
+                    for agent_record in agent_names_resp.data:
+                        agent_language_id = agent_record.get('language_id')
+                        agent_name = agent_record.get('agent_name')
+                        if agent_language_id and agent_name:
+                            # Get language code for the key
+                            lang_resp = self.get_supabase_client().table('language').select('language_code').eq('id', agent_language_id).limit(1).execute()
+                            if lang_resp.data:
+                                lang_code = lang_resp.data[0].get('language_code', 'en')
+                                dynamic_variables[f'agent_name_{lang_code}'] = agent_name
+
+            # Add basic call information
+            dynamic_variables['caller_number'] = from_number
+            dynamic_variables['callee_number'] = to_number
+            dynamic_variables['call_type'] = 'inbound'
+            dynamic_variables['source'] = 'twilio_webhook'
+
+            logger.info(f"Dynamic variables built successfully: {list(dynamic_variables.keys())}")
+            return dynamic_variables
+
+        except Exception as e:
+            logger.error(f"Error getting dynamic variables: {e}")
+            return self._get_default_dynamic_variables(from_number, to_number)
+
+    def _get_default_dynamic_variables(self, from_number: str, to_number: str) -> Dict[str, Any]:
+        """
+        Get default dynamic variables when customer lookup fails
+        """
+        logger.info("Using default dynamic variables for unknown customer")
+        return {
+            'customer_name': 'Valued Customer',
+            'customer_id': 'unknown',
+            'account_type': 'standard',
+            'client_name': 'Our Company',
+            'caller_number': from_number,
+            'callee_number': to_number,
+            'call_type': 'inbound',
+            'source': 'twilio_webhook'
+        }
+
     def register_phone_call_with_retell(self, agent_id: str, from_number: str, to_number: str) -> Optional[str]:
         """
         Register phone call with Retell AI and return call_id
         """
         try:
+            # Get dynamic variables using the same chain as call_inbound webhook
+            dynamic_variables = self._get_dynamic_variables_from_supabase(to_number, from_number)
+            
             # Prepare request payload
             payload = {
                 "agent_id": agent_id,
                 "from_number": from_number,
                 "to_number": to_number,
                 "direction": "inbound",
-                "retell_llm_dynamic_variables": {
-                    "caller_id": from_number,
-                    "callee_id": to_number,
-                    "call_type": "inbound",
-                    "source": "twilio_webhook"
-                }
+                "retell_llm_dynamic_variables": dynamic_variables
             }
             
             headers = {"Authorization": f"Bearer {self.retell_api_key}"}
