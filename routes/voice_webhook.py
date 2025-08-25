@@ -357,23 +357,29 @@ class VoiceWebhookService:
     def generate_twiml_response(self, call_id: str) -> str:
         """
         TwiML:
-          1) Start Twilio Media Streams (stereo, both legs) to our WS
-          2) Dial Retell SIP using the call_id
+          1) Start Media Stream for INBOUND (caller) 
+          2) Dial Retell with Media Stream for OUTBOUND (agent)
         """
         try:
             vr = VoiceResponse()
 
-            # 1) Start stereo Media Streams (caller=ch0, callee=ch1) to your WS
-            start = Start()
-            # IMPORTANT: the endpoint below must be your WS handler that forwards to Deepgram (multichannel)
-            start.stream(
-                url=f"wss://{self.public_hostname}/transcription/stream",
-                track="both_tracks",
+            # 1) Start Media Stream for INBOUND (caller)
+            start_in = Start()
+            start_in.stream(
+                url=f"wss://{self.public_hostname}/transcription/stream?track=inbound"
             )
-            vr.append(start)
+            vr.append(start_in)
 
-            # 2) Dial Retell (same SIP format you used before)
+            # 2) Dial Retell
             dial = Dial()
+
+            # 3) Start Media Stream for OUTBOUND (dialed party / agent)
+            start_out = Start()
+            start_out.stream(
+                url=f"wss://{self.public_hostname}/transcription/stream?track=outbound"
+            )
+            dial.append(start_out)
+
             sip_url = f"sip:{call_id}@5t4n6j0wnrl.sip.livekit.cloud"
             dial.sip(sip_url)
             logger.info(f"Dialing Retell SIP: {sip_url}")
